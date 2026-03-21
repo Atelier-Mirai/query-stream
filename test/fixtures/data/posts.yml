@@ -1,0 +1,14 @@
+- slug: my-first-post
+  title: はじめての投稿
+  author: テスト太郎
+  tags: [blog, intro]
+
+- slug: ruby-tips
+  title: Rubyの小技集
+  author: テスト花子
+  tags: [ruby, tips]
+
+- slug: css-tricks
+  title: CSSの裏技
+  author: テスト太郎
+  tags: [css, tips]
