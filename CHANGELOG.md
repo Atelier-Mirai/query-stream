@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-03-21
+
+### 🎉 最初のメジャーリリース
+
+QueryStream 1.0.0 としてリリース！YAML/JSON データファイルとテンプレートファイルを組み合わせて、テキストコンテンツ内の QueryStream 記法を展開する汎用 Ruby ライブラリが完成しました。
+
+### ✅ 実績と品質保証
+- **vivlio-starter** プロジェクトで実稼働実績
+- **109 テストケース**、**395 アサーション**で網羅的品質保証
+- **VFM フェンス記法** 完全対応と実用性検証
+
+### 🚀 主要機能
+- QueryStream 記法の完全実装（源泉・抽出・ソート・件数・スタイル）
+- VFM フェンス記法対応（`:::{.class-name}` 〜 `:::`）
+- テンプレートコンパイラ（変数展開、画像記法、ネスト値アクセス）
+- 高度なデータ処理（フィルタリング、ソート、単数形化）
+- 柔軟な設定システム
+
+### 📚 ドキュメント整備
+- 詳細な README と具体例
+- 完全な CHANGELOG
+- vivlio-style での実装例
+
+### 🔧 技術的特徴
+- **Ruby 4.0+** モダン開発標準準拠
+- **Semantic Versioning** 準拠
+- 後方互換性保証
+
 ## [0.3.0] - 2026-03-21
 
 ### Added

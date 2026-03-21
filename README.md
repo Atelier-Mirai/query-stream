@@ -39,6 +39,66 @@ result = QueryStream.render(source)
 = books | :full                   # fullスタイルで展開
 ```
 
+### 具体例：vivlio-style での書籍データ展開
+
+#### データファイル例 (`data/books.yml`)
+
+```yaml
+- title: 楽しいRuby
+  author: 
+    name: 高橋征義
+  desc: Rubyを楽しく学べる入門書。
+  cover: ruby.webp
+
+- title: はじめてのC
+  author: 
+    name: 柴田望洋
+  desc: C言語の定番入門書。
+  cover: c.webp
+```
+
+#### テンプレートファイル例 (`templates/_book.md`)
+
+```markdown
+:::{.book-card}
+![](cover)
+**=title**
+=desc
+:::
+```
+
+#### Markdown記述
+
+```markdown
+## 参考書籍
+
+= books
+
+---
+```
+
+#### 展開結果
+
+```markdown
+## 参考書籍
+
+:::{.book-card}
+![](ruby.webp)
+**楽しいRuby**
+Rubyを楽しく学べる入門書。
+:::
+
+:::{.book-card}
+![](c.webp)
+**はじめてのC**
+C言語の定番入門書。
+:::
+
+---
+```
+
+VFMフェンス記法（`:::{.book-card}`）にも対応しており、各レコードが個別のフェンスで囲まれて展開されます。
+
 ## 設定
 
 ```ruby
