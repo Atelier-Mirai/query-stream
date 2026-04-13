@@ -1010,20 +1010,117 @@ class QueryStreamIntegrationTest < Minitest::Test
   # エラーハンドリング
   # ----------------------------------------------------------------
 
-  # 存在しないデータファイルでエラーになる
-  def test_should_raise_error_for_missing_data_file
-    content = "= nonexistent\n"
-    assert_raises(QueryStream::DataNotFoundError) do
-      render(content)
-    end
+  # 存在しないデータファイルは元の行を残して処理を継続する
+  def test_should_keep_line_and_continue_for_missing_data_file
+    content = "前の行\n= nonexistent\n後の行\n"
+    errors = []
+    result = QueryStream.render(
+      content,
+      source_filename: 'test.md',
+      data_dir: FIXTURE_DATA_DIR,
+      templates_dir: FIXTURE_TEMPLATES_DIR,
+      on_error: ->(e) { errors << e }
+    )
+
+    assert_equal 1, errors.size
+    assert_kind_of QueryStream::DataNotFoundError, errors.first
+    assert_includes errors.first.expected_path, 'nonexistent'
+    assert_equal '= nonexistent', errors.first.query
+    assert_includes result, '前の行'
+    assert_includes result, '= nonexistent'  # 元の行が残る
+    assert_includes result, '後の行'
   end
 
-  # 存在しないテンプレートでエラーになる
-  def test_should_raise_error_for_missing_template
-    content = "= books | :nonexistent_style\n"
-    assert_raises(QueryStream::TemplateNotFoundError) do
-      render(content)
-    end
+  # 存在しないテンプレートは元の行を残して処理を継続する
+  def test_should_keep_line_and_continue_for_missing_template
+    content = "前の行\n= books | :nonexistent_style\n後の行\n"
+    errors = []
+    result = QueryStream.render(
+      content,
+      source_filename: 'test.md',
+      data_dir: FIXTURE_DATA_DIR,
+      templates_dir: FIXTURE_TEMPLATES_DIR,
+      on_error: ->(e) { errors << e }
+    )
+
+    assert_equal 1, errors.size
+    assert_kind_of QueryStream::TemplateNotFoundError, errors.first
+    assert_includes errors.first.template_path, '_book.nonexistent_style.md'
+    assert_equal '= books | :nonexistent_style', errors.first.query
+    assert_includes result, '前の行'
+    assert_includes result, '= books | :nonexistent_style'  # 元の行が残る
+    assert_includes result, '後の行'
+  end
+
+  # 複数のQueryStream記法があるとき、1つが失敗しても残りは展開される
+  def test_should_continue_expanding_after_error
+    content = <<~MD
+      = books | tags=ruby && tags=beginner
+      = books | :shart
+      = prefectures | region=関東
+    MD
+    errors = []
+    result = QueryStream.render(
+      content,
+      source_filename: 'test.md',
+      data_dir: FIXTURE_DATA_DIR,
+      templates_dir: FIXTURE_TEMPLATES_DIR,
+      on_error: ->(e) { errors << e }
+    )
+
+    assert_equal 1, errors.size
+    assert_kind_of QueryStream::TemplateNotFoundError, errors.first
+    assert_includes result, '楽しいRuby'    # 1行目は展開される
+    assert_includes result, '= books | :shart'  # 2行目は元の行が残る
+    assert_includes result, '東京都'         # 3行目は展開される
+  end
+
+  # DataNotFoundError が構造化属性を持つ
+  def test_should_raise_data_not_found_error_with_attributes
+    error = nil
+    QueryStream.render(
+      "= nonexistent\n",
+      source_filename: 'test.md',
+      data_dir: FIXTURE_DATA_DIR,
+      templates_dir: FIXTURE_TEMPLATES_DIR,
+      on_error: ->(e) { error = e }
+    )
+
+    assert_kind_of QueryStream::DataNotFoundError, error
+    assert_includes error.expected_path, 'nonexistent'
+    assert_equal '= nonexistent', error.query
+    assert_match(/test\.md/, error.location)
+  end
+
+  # TemplateNotFoundError が構造化属性を持つ
+  def test_should_raise_template_not_found_error_with_attributes
+    error = nil
+    QueryStream.render(
+      "= books | :typo_style\n",
+      source_filename: 'test.md',
+      data_dir: FIXTURE_DATA_DIR,
+      templates_dir: FIXTURE_TEMPLATES_DIR,
+      on_error: ->(e) { error = e }
+    )
+
+    assert_kind_of QueryStream::TemplateNotFoundError, error
+    assert_includes error.template_path, '_book.typo_style.md'
+    assert_equal '= books | :typo_style', error.query
+    assert_match(/test\.md/, error.location)
+  end
+
+  # on_error を省略した場合もエラーなく処理が継続する
+  def test_should_continue_without_on_error_callback
+    content = "= nonexistent\n= books | tags=ruby && tags=beginner\n"
+    result = QueryStream.render(
+      content,
+      source_filename: 'test.md',
+      data_dir: FIXTURE_DATA_DIR,
+      templates_dir: FIXTURE_TEMPLATES_DIR
+    )
+
+    assert_includes result, '= nonexistent'  # 元の行が残る
+    assert_includes result, '楽しいRuby'     # 後続は展開される
   end
 
   # 一件検索で0件の場合は空文字列になる

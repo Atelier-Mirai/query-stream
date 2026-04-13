@@ -49,12 +49,15 @@ module QueryStream
     end
 
     # テキストコンテンツ内の QueryStream 記法をすべて展開する
+    # 1行の展開に失敗しても残りの行の処理を継続する。
+    # エラー情報は例外の属性として呼び出し元に委ねる（gem 内ではログ出力しない）。
     # @param content [String] テキストコンテンツ
     # @param source_filename [String, nil] エラー報告用のソースファイル名
     # @param data_dir [String, nil] データディレクトリ（nil時はconfigを使用）
     # @param templates_dir [String, nil] テンプレートディレクトリ（nil時はconfigを使用）
+    # @param on_error [Proc, nil] エラー時コールバック。|exception| を受け取る。省略時は何もしない。
     # @return [String] 展開後のテキストコンテンツ
-    def render(content, source_filename: nil, data_dir: nil, templates_dir: nil)
+    def render(content, source_filename: nil, data_dir: nil, templates_dir: nil, on_error: nil)
       data_dir      ||= configuration.data_dir
       templates_dir ||= configuration.templates_dir
 
@@ -79,10 +82,16 @@ module QueryStream
 
         # QueryStream 記法の検出
         if line.match?(QUERY_STREAM_PATTERN)
-          expanded = render_query(
-            line.chomp, line_number:, source_filename:, data_dir:, templates_dir:
-          )
-          result << expanded << "\n"
+          begin
+            expanded = render_query(
+              line.chomp, line_number:, source_filename:, data_dir:, templates_dir:
+            )
+            result << expanded << "\n"
+          rescue Error => e
+            # 1行の失敗で残りの展開を止めない。エラー処理は呼び出し元に委ねる。
+            on_error&.call(e)
+            result << line
+          end
         else
           result << line
         end
@@ -107,13 +116,16 @@ module QueryStream
       parsed = QueryStreamParser.parse(query)
 
       # --- Phase: Load Data ---
+      # gem 内でログ出力せず、構造化された属性を持つ例外を raise する。
+      # メッセージの構成・ログ出力・i18n は呼び出し元の責務とする。
       data_file = DataResolver.resolve(parsed[:source], data_dir)
       unless data_file
         expected = File.join(data_dir, "#{parsed[:source]}.yml")
-        logger.error("データファイルが見つかりません(#{location})")
-        logger.error("  記法: #{query}")
-        logger.error("  期待: #{expected}")
-        raise DataNotFoundError, "データファイルが見つかりません: #{expected}"
+        raise DataNotFoundError.new(
+          expected_path: expected,
+          query:         query,
+          location:      location
+        )
       end
 
       records = DataResolver.load_records(data_file)
@@ -149,11 +161,14 @@ module QueryStream
 
       unless File.exist?(template_path)
         hint = build_template_hint(singular, style, format, templates_dir)
-        logger.error("テンプレートファイルが見つかりません(#{location})")
-        logger.error("  記法: #{query}")
-        logger.error("  期待: #{template_path}")
-        logger.error("  ヒント: #{hint}") if hint
-        raise TemplateNotFoundError, "テンプレートファイルが見つかりません: #{template_path}"
+        # gem 内でログ出力せず、構造化された属性を持つ例外を raise する。
+        # メッセージの構成・ログ出力・i18n は呼び出し元の責務とする。
+        raise TemplateNotFoundError.new(
+          template_path: template_path,
+          query:         query,
+          location:      location,
+          hint:          hint
+        )
       end
 
       template_content = File.read(template_path, encoding: 'utf-8')

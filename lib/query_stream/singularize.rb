@@ -26,7 +26,7 @@ module QueryStream
     # @return [String] 単数形の単語
     def call(word)
       case word.to_s
-      in /\Apeople(.*)\z/              then "person#{$1}"    # people → person（不規則）
+      in /\Apeople(.*)\z/i             then "person#{$1}"    # people/People → person（不規則、大文字小文字不問）
       in /\A(.+)ies\z/                 then "#{$1}y"         # categories → category
       in /\A(.+)([sxz]|ch|sh)es\z/    then "#{$1}#{$2}"     # branches → branch
       in /\A(.+)ves\z/                 then "#{$1}f"         # shelves → shelf

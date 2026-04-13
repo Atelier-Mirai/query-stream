@@ -14,6 +14,9 @@ Gem::Specification.new do |spec|
   spec.homepage      = 'https://github.com/Atelier-Mirai/query-stream'
   spec.license       = 'MIT'
 
+  spec.metadata['source_code_uri'] = 'https://github.com/Atelier-Mirai/query-stream'
+  spec.metadata['changelog_uri']   = 'https://github.com/Atelier-Mirai/query-stream/blob/master/CHANGELOG.md'
+
   spec.required_ruby_version = '>= 4.0'
 
   spec.files = Dir.glob('{lib,bin}/**/*') + %w[README.md LICENSE Gemfile query-stream.gemspec]
