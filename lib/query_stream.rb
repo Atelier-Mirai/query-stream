@@ -56,8 +56,9 @@ module QueryStream
     # @param data_dir [String, nil] データディレクトリ（nil時はconfigを使用）
     # @param templates_dir [String, nil] テンプレートディレクトリ（nil時はconfigを使用）
     # @param on_error [Proc, nil] エラー時コールバック。|exception| を受け取る。省略時は何もしない。
+    # @param on_warning [Proc, nil] 警告時コールバック。|warning| を受け取る。省略時は何もしない。
     # @return [String] 展開後のテキストコンテンツ
-    def render(content, source_filename: nil, data_dir: nil, templates_dir: nil, on_error: nil)
+    def render(content, source_filename: nil, data_dir: nil, templates_dir: nil, on_error: nil, on_warning: nil)
       data_dir      ||= configuration.data_dir
       templates_dir ||= configuration.templates_dir
 
@@ -84,7 +85,7 @@ module QueryStream
         if line.match?(QUERY_STREAM_PATTERN)
           begin
             expanded = render_query(
-              line.chomp, line_number:, source_filename:, data_dir:, templates_dir:
+              line.chomp, line_number:, source_filename:, data_dir:, templates_dir:, on_warning:
             )
             result << expanded << "\n"
           rescue Error => e
@@ -107,7 +108,7 @@ module QueryStream
     # @param data_dir [String, nil] データディレクトリ
     # @param templates_dir [String, nil] テンプレートディレクトリ
     # @return [String] 展開後のテキスト
-    def render_query(query, line_number: nil, source_filename: nil, data_dir: nil, templates_dir: nil)
+    def render_query(query, line_number: nil, source_filename: nil, data_dir: nil, templates_dir: nil, on_warning: nil)
       data_dir      ||= configuration.data_dir
       templates_dir ||= configuration.templates_dir
       location = source_filename ? "#{source_filename}:#{line_number}" : "行#{line_number}"
@@ -143,13 +144,16 @@ module QueryStream
       if parsed[:single_lookup]
         case records.size
         when 0
-          logger.warn("一件検索で該当なし(#{location}): #{query}")
+          # gem 内でログ出力せず、構造化された属性を持つ警告を呼び出し元に委ねる。
+          on_warning&.call(NoResultWarning.new(query: query, location: location))
           return ''
         when 1
           # 正常
         else
-          logger.warn("一件検索で複数件ヒット(#{location}): #{query}")
-          logger.warn("  #{records.size}件見つかりました。条件を明示してください。")
+          # gem 内でログ出力せず、構造化された属性を持つ警告を呼び出し元に委ねる。
+          on_warning&.call(
+            AmbiguousQueryWarning.new(query: query, location: location, count: records.size)
+          )
         end
       end
 
