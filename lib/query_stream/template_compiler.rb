@@ -129,8 +129,21 @@ module QueryStream
     # @param lines [Array<String>] テンプレートの行リスト
     # @return [Array<Hash>] 分類済み行リスト
     def classify_lines(lines)
+      in_code_block = false
       lines.map do |line|
         stripped = line.strip
+
+        # コードブロックのフェンス行（``` で始まる行）を検出してトグル
+        if stripped.start_with?('```')
+          in_code_block = !in_code_block
+          next { type: :static, content: line }
+        end
+
+        # コードブロック内は変数展開せず static として扱う
+        if in_code_block
+          next { type: :static, content: line }
+        end
+
         if stripped.empty?
           { type: :blank }
         elsif stripped.match?(FENCE_OPEN_PATTERN)
@@ -298,8 +311,18 @@ module QueryStream
 
       location = source_filename ? "#{source_filename}:#{line_number}" : ''
       available_keys = sample_record.keys
+      in_code_block = false
 
       lines.each do |line|
+        stripped = line.strip
+
+        # コードブロック内はキー検証をスキップ
+        if stripped.start_with?('```')
+          in_code_block = !in_code_block
+          next
+        end
+        next if in_code_block
+
         # = key パターン（ドット記法の場合はルートキーのみ検証）
         line.scan(VARIABLE_PATTERN).each do |(key_path)|
           root_key = key_path.split('.').first.to_sym

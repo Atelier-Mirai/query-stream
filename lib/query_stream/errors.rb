@@ -55,6 +55,35 @@ module QueryStream
   class InvalidDateError < Error; end    # 無効な日付
 
   # WARNING系（処理を続行）
-  class AmbiguousQueryWarning < Warning; end # 一件検索で複数件ヒット
-  class NoResultWarning       < Warning; end # 一件検索で0件ヒット
+  #
+  # ERROR と同様に構造化された属性を持ち、gem 内ではログ出力を行わず、
+  # 呼び出し元が on_warning コールバックで独自メッセージを構成する。
+
+  # 一件検索で0件ヒット
+  # @attr_reader query [String] 元の QueryStream 記法
+  # @attr_reader location [String] ソースファイル名と行番号
+  class NoResultWarning < Warning
+    attr_reader :query, :location
+
+    def initialize(msg = nil, query: nil, location: nil)
+      super(msg || "一件検索で該当なし: #{query}")
+      @query    = query
+      @location = location
+    end
+  end
+
+  # 一件検索で複数件ヒット
+  # @attr_reader query [String] 元の QueryStream 記法
+  # @attr_reader location [String] ソースファイル名と行番号
+  # @attr_reader count [Integer] ヒット件数
+  class AmbiguousQueryWarning < Warning
+    attr_reader :query, :location, :count
+
+    def initialize(msg = nil, query: nil, location: nil, count: nil)
+      super(msg || "一件検索で複数件ヒット(#{count}件): #{query}")
+      @query    = query
+      @location = location
+      @count    = count
+    end
+  end
 end
