@@ -54,6 +54,26 @@ module QueryStream
   class UnknownKeyError  < Error; end    # テンプレート内に存在しないキー
   class InvalidDateError < Error; end    # 無効な日付
 
+  # データファイルの読み込みに失敗した
+  # （YAML/JSON 構文エラー、YAML で許可されていないクラス/タグ等）
+  #
+  # セキュリティ設計:
+  #   YAML データファイルは `YAML.safe_load_file` で読み込まれ、
+  #   `!ruby/object` など危険な Ruby オブジェクトタグは
+  #   `Psych::DisallowedClass` として検出され、本例外に変換される。
+  #
+  # @attr_reader file_path [String] 読み込みに失敗したファイルパス
+  # @attr_reader cause_error [StandardError, nil] 元の例外（Psych::DisallowedClass 等）
+  class DataLoadError < Error
+    attr_reader :file_path, :cause_error
+
+    def initialize(msg = nil, file_path: nil, cause_error: nil)
+      super(msg || "データファイルの読み込みに失敗しました: #{file_path}")
+      @file_path = file_path
+      @cause_error = cause_error
+    end
+  end
+
   # WARNING系（処理を続行）
   #
   # ERROR と同様に構造化された属性を持ち、gem 内ではログ出力を行わず、

@@ -681,6 +681,136 @@ class DataResolverTest < Minitest::Test
     path = Resolver.resolve('nonexistent', FIXTURE_DATA_DIR)
     assert_nil path
   end
+
+  # ----------------------------------------------------------------
+  # セキュリティ: YAML safe_load による !ruby/object 等の拒否
+  # ----------------------------------------------------------------
+  # 対応する Vivlio Starter 堅牢性仕様:
+  #   - 11-2: data/*.yml に !ruby/object タグが含まれる場合の安全性
+  # ----------------------------------------------------------------
+
+  # !ruby/object タグを含む YAML は DataLoadError で拒否される
+  def test_should_reject_ruby_object_tag_in_yaml
+    require 'tmpdir'
+    Dir.mktmpdir('qs-safety-') do |tmp|
+      evil = File.join(tmp, 'evil.yml')
+      File.write(evil, "foo: !ruby/object:Object {}\n")
+
+      error = assert_raises(QueryStream::DataLoadError) do
+        Resolver.load_records(evil)
+      end
+
+      assert_includes error.message, '許可されていないクラス/タグ'
+      assert_includes error.message, evil, 'エラー文言にファイルパスが含まれること'
+      assert_kind_of Psych::DisallowedClass, error.cause_error
+      assert_equal evil, error.file_path
+    end
+  end
+
+  # !ruby/struct のようなユーザー定義クラス系タグも拒否される
+  def test_should_reject_ruby_struct_tag_in_yaml
+    require 'tmpdir'
+    Dir.mktmpdir('qs-safety-') do |tmp|
+      evil = File.join(tmp, 'evil.yml')
+      File.write(evil, "point: !ruby/struct:Point\n  x: 1\n  y: 2\n")
+
+      error = assert_raises(QueryStream::DataLoadError) do
+        Resolver.load_records(evil)
+      end
+      assert_includes error.message, '許可されていないクラス/タグ'
+      assert_kind_of Psych::DisallowedClass, error.cause_error
+    end
+  end
+
+  # !ruby/hash:ClassName のような Hash サブクラスタグも拒否される
+  def test_should_reject_ruby_hash_subclass_tag_in_yaml
+    require 'tmpdir'
+    Dir.mktmpdir('qs-safety-') do |tmp|
+      evil = File.join(tmp, 'evil.yml')
+      File.write(evil, "data: !ruby/hash:MyCustomHash\n  foo: bar\n")
+
+      error = assert_raises(QueryStream::DataLoadError) do
+        Resolver.load_records(evil)
+      end
+      assert_includes error.message, '許可されていないクラス/タグ'
+    end
+  end
+
+  # Symbol / Time / Date / DateTime は許可される（実用データ向け）
+  def test_should_allow_basic_types_including_symbol_and_time
+    require 'tmpdir'
+    Dir.mktmpdir('qs-safety-') do |tmp|
+      path = File.join(tmp, 'ok.yml')
+      File.write(path, <<~YAML)
+        - name: alice
+          registered_at: 2024-04-01 12:00:00
+          birthday: 1990-01-01
+      YAML
+
+      records = Resolver.load_records(path)
+      assert_kind_of Array, records
+      assert_equal 'alice', records.first[:name]
+      assert_kind_of Time, records.first[:registered_at]
+      assert_kind_of Date, records.first[:birthday]
+    end
+  end
+
+  # YAML 構文エラーは DataLoadError に変換される
+  def test_should_convert_syntax_error_to_data_load_error
+    require 'tmpdir'
+    Dir.mktmpdir('qs-safety-') do |tmp|
+      bad = File.join(tmp, 'bad.yml')
+      File.write(bad, "foo: bar\n  :broken: syntax:\n")
+
+      error = assert_raises(QueryStream::DataLoadError) do
+        Resolver.load_records(bad)
+      end
+      assert_includes error.message, 'YAML 構文エラー'
+      assert_kind_of Psych::SyntaxError, error.cause_error
+    end
+  end
+
+  # JSON 構文エラーも DataLoadError に変換される
+  def test_should_convert_json_syntax_error_to_data_load_error
+    require 'tmpdir'
+    Dir.mktmpdir('qs-safety-') do |tmp|
+      bad = File.join(tmp, 'bad.json')
+      File.write(bad, "{ invalid json")
+
+      error = assert_raises(QueryStream::DataLoadError) do
+        Resolver.load_records(bad)
+      end
+      assert_includes error.message, 'JSON 構文エラー'
+    end
+  end
+
+  # 通常の anchor / alias は正常に展開される（DoS 耐性の副次確認）
+  def test_should_allow_normal_yaml_aliases
+    require 'tmpdir'
+    Dir.mktmpdir('qs-safety-') do |tmp|
+      path = File.join(tmp, 'aliases.yml')
+      File.write(path, <<~YAML)
+        defaults: &defaults
+          role: member
+        - <<: *defaults
+          name: alice
+        - <<: *defaults
+          name: bob
+      YAML
+      # 注: 上記は Hash + Array の混在で YAML としては不正だが、意図のみを書き残す
+      # 代わりにシンプルなエイリアスで確認する
+      File.write(path, <<~YAML)
+        - &a1
+          name: alice
+          role: member
+        - *a1
+      YAML
+
+      records = Resolver.load_records(path)
+      assert_equal 2, records.size
+      assert_equal records.first, records.last, 'alias 参照により同一内容になること'
+    end
+  end
 end
 
 # ================================================================

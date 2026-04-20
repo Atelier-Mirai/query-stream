@@ -12,6 +12,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-04-20
+
+### Security
+- **`DataResolver.load_records` を `YAML.safe_load_file` に移行** (`lib/query_stream/data_resolver.rb`):
+  従来は `YAML.load_file(file_path, symbolize_names: true)` を使用しており、Psych のバージョンや将来のアップデートで `!ruby/object` などの Ruby オブジェクトタグが受理されてしまう可能性があった。
+  `permitted_classes: [Symbol, Time, Date, DateTime]` と `aliases: true` を明示的に指定する `YAML.safe_load_file` に置き換え、安全性を Psych バージョン非依存にした。
+  これにより悪意のあるデータファイル（`!ruby/object:Kernel {}` 等）を読み込ませて任意コード実行を試みる攻撃ベクトルを明示的に塞いだ。
+  なお Symbol が許可されているため `symbolize_names: true` の挙動は従来どおり維持される。
+
+### Added
+- **`QueryStream::DataLoadError` 新規例外クラス** (`lib/query_stream/errors.rb`):
+  `Psych::DisallowedClass` / `Psych::SyntaxError` / `JSON::ParserError` を呼び出し元に優しいメッセージ付きの `DataLoadError` に変換する。
+  `file_path` と `cause_error` 属性を持ち、呼び出し元で詳細なログ出力や i18n が可能。
+
+### Tests
+- **セキュリティテスト 7 件を追加** (`test/query_stream_test.rb`):
+  - `!ruby/object:Object {}` を含む YAML は `DataLoadError` で拒否
+  - `!ruby/struct:Point` / `!ruby/hash:MyCustomHash` も同様に拒否
+  - Symbol / Time / Date / DateTime は正常に読み込める
+  - YAML / JSON 構文エラーは `DataLoadError` に変換される
+  - 通常の YAML anchor / alias は正常に展開される（DoS 耐性の副次確認）
+
 ## [1.2.0] - 2026-04-19
 
 ### Fixed
