@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - パフォーマンス最適化
 - 追加のテンプレートスタイル
 
-## [Unreleased]
+## [1.2.2] - 2026-04-26
 
 ### Fixed
 - **アンダースコア付き複合名の単数形変換が誤る問題を修正** (`lib/query_stream/singularize.rb`): `physics_books` が `physic_books` に変換されていた問題を修正。アンダースコアで分割し、末尾から複数形セグメントを探して単数化するよう変更。`people` は不規則変化として優先処理。`physics_books` → `physics_book`、`books_nested` → `book_nested` が正しく変換されるようになった。
