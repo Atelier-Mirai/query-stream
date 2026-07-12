@@ -25,11 +25,17 @@ module QueryStream
     # @return [Logger] ログ出力先
     attr_accessor :logger
 
+    # 1 記法の展開結果を、コンテキスト付きで呼び出し元へ通す後段フィルタ。
+    # gem 自身は用途を規定しない（画像パス解決など呼び出し元固有の後処理を担わせる）。
+    # @return [Proc, nil] (text, context) -> String。String 以外を返した場合は元の展開結果を採用する
+    attr_accessor :post_render
+
     def initialize
       @data_dir       = 'data'
       @templates_dir  = 'templates'
       @default_format = :md
       @logger         = Logger.new($stdout)
+      @post_render    = nil
     end
   end
 end

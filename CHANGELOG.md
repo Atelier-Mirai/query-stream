@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - パフォーマンス最適化
 - 追加のテンプレートスタイル
 
+## [1.3.0] - 2026-07-12
+
+### Added
+- **`post_render` 後段フィルタコールバックを追加** (`lib/query_stream.rb`, `lib/query_stream/configuration.rb`): 1 記法の展開結果を、コンテキスト付きで呼び出し元へ通す汎用フックを新設。`QueryStream.render` / `render_query` に `post_render:` キーワードを追加し、`Configuration#post_render` からも指定できる。コールバックは `(text, context)` を受け取り、`context` は `source`（記法の論理名）・`data_file`（単複解決後の実パス）・`data_dir`・`template_path`・`query`・`location` を含む。戻り値が String ならそれを、String 以外（nil 含む）なら元の展開結果を採用する。gem 自身は用途を規定せず、画像パス解決などの呼び出し元固有の後処理を委譲できる。コールバック内の例外は握り潰さず伝播する（`render` の既存 rescue は `QueryStream::Error` のみ捕捉するため、それ以外の後処理例外の扱いは呼び出し元の責務）。
+
 ## [1.2.2] - 2026-04-26
 
 ### Fixed

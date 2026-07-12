@@ -1381,3 +1381,99 @@ class QueryStreamIntegrationTest < Minitest::Test
     )
   end
 end
+
+# ================================================================
+# 7. post_render 後段フィルタ テスト
+# ================================================================
+class PostRenderCallbackTest < Minitest::Test
+  # post_render が展開結果とコンテキスト全キーを受け取る
+  def test_should_pass_rendered_text_and_full_context_to_callback
+    seen_text = nil
+    seen_ctx = nil
+    QueryStream.render(
+      "= books | tags=ruby && tags=beginner\n",
+      source_filename: 'test.md',
+      data_dir: FIXTURE_DATA_DIR,
+      templates_dir: FIXTURE_TEMPLATES_DIR,
+      post_render: lambda do |text, ctx|
+        seen_text = text
+        seen_ctx = ctx
+        text
+      end
+    )
+
+    assert_includes seen_text, '楽しいRuby'
+    assert_pattern do
+      seen_ctx => {
+        source: 'books',
+        data_file: String,
+        data_dir: String,
+        template_path: String,
+        query: '= books | tags=ruby && tags=beginner',
+        location: String
+      }
+    end
+    assert_includes seen_ctx[:data_file], 'books'
+    assert_match(/test\.md/, seen_ctx[:location])
+  end
+
+  # 戻り値の String が採用される
+  def test_should_adopt_string_return_value
+    result = QueryStream.render(
+      "= books | tags=ruby && tags=beginner\n",
+      source_filename: 'test.md',
+      data_dir: FIXTURE_DATA_DIR,
+      templates_dir: FIXTURE_TEMPLATES_DIR,
+      post_render: ->(_text, _ctx) { 'REPLACED' }
+    )
+
+    assert_includes result, 'REPLACED'
+    refute_includes result, '楽しいRuby'
+  end
+
+  # nil / 非 String の戻り値は元の展開結果を採用する
+  def test_should_fall_back_to_rendered_when_return_is_not_string
+    [nil, 42, %w[a b]].each do |bad_return|
+      result = QueryStream.render(
+        "= books | tags=ruby && tags=beginner\n",
+        source_filename: 'test.md',
+        data_dir: FIXTURE_DATA_DIR,
+        templates_dir: FIXTURE_TEMPLATES_DIR,
+        post_render: ->(_text, _ctx) { bad_return }
+      )
+
+      assert_includes result, '楽しいRuby', "戻り値 #{bad_return.inspect} で元テキストが採用されるべき"
+    end
+  end
+
+  # configuration.post_render 経路でも呼ばれる
+  def test_should_use_post_render_from_configuration
+    called = false
+    QueryStream.configure { |c| c.post_render = ->(text, _ctx) { (called = true) && text } }
+
+    QueryStream.render(
+      "= books | tags=ruby && tags=beginner\n",
+      source_filename: 'test.md',
+      data_dir: FIXTURE_DATA_DIR,
+      templates_dir: FIXTURE_TEMPLATES_DIR
+    )
+
+    assert called, 'configuration.post_render が呼ばれるべき'
+  ensure
+    QueryStream.configure { |c| c.post_render = nil }
+  end
+
+  # 記法が無い行では post_render が呼ばれない
+  def test_should_not_invoke_callback_when_no_query_stream
+    called = false
+    QueryStream.render(
+      "ただの本文\n見出し\n",
+      source_filename: 'test.md',
+      data_dir: FIXTURE_DATA_DIR,
+      templates_dir: FIXTURE_TEMPLATES_DIR,
+      post_render: ->(_text, _ctx) { called = true }
+    )
+
+    refute called, 'QueryStream 記法が無ければ post_render は呼ばれないべき'
+  end
+end

@@ -57,10 +57,13 @@ module QueryStream
     # @param templates_dir [String, nil] テンプレートディレクトリ（nil時はconfigを使用）
     # @param on_error [Proc, nil] エラー時コールバック。|exception| を受け取る。省略時は何もしない。
     # @param on_warning [Proc, nil] 警告時コールバック。|warning| を受け取る。省略時は何もしない。
+    # @param post_render [Proc, nil] 展開結果の後段フィルタ。(text, context) -> String。省略時は configuration.post_render を使う。
     # @return [String] 展開後のテキストコンテンツ
-    def render(content, source_filename: nil, data_dir: nil, templates_dir: nil, on_error: nil, on_warning: nil)
+    def render(content, source_filename: nil, data_dir: nil, templates_dir: nil, on_error: nil, on_warning: nil,
+               post_render: nil)
       data_dir      ||= configuration.data_dir
       templates_dir ||= configuration.templates_dir
+      post_render   ||= configuration.post_render
 
       lines = content.lines
       result = []
@@ -85,7 +88,7 @@ module QueryStream
         if line.match?(QUERY_STREAM_PATTERN)
           begin
             expanded = render_query(
-              line.chomp, line_number:, source_filename:, data_dir:, templates_dir:, on_warning:
+              line.chomp, line_number:, source_filename:, data_dir:, templates_dir:, on_warning:, post_render:
             )
             result << expanded << "\n"
           rescue Error => e
@@ -107,8 +110,10 @@ module QueryStream
     # @param source_filename [String, nil] ソースファイル名
     # @param data_dir [String, nil] データディレクトリ
     # @param templates_dir [String, nil] テンプレートディレクトリ
+    # @param post_render [Proc, nil] 展開結果の後段フィルタ。(text, context) -> String
     # @return [String] 展開後のテキスト
-    def render_query(query, line_number: nil, source_filename: nil, data_dir: nil, templates_dir: nil, on_warning: nil)
+    def render_query(query, line_number: nil, source_filename: nil, data_dir: nil, templates_dir: nil, on_warning: nil,
+                     post_render: nil)
       data_dir      ||= configuration.data_dir
       templates_dir ||= configuration.templates_dir
       location = source_filename ? "#{source_filename}:#{line_number}" : "行#{line_number}"
@@ -178,7 +183,23 @@ module QueryStream
       template_content = File.read(template_path, encoding: 'utf-8')
 
       # --- Phase: Render ---
-      TemplateCompiler.render(template_content, records, source_filename:, line_number:)
+      rendered = TemplateCompiler.render(template_content, records, source_filename:, line_number:)
+
+      # --- Phase: Post-render filter ---
+      # 展開結果を呼び出し元の後段フィルタへ通す（画像パス解決など gem 外の後処理）。
+      # コールバックが String 以外を返した場合は安全側に倒して元の展開結果を採用する。
+      return rendered unless post_render
+
+      context = {
+        source:        parsed[:source],   # 記法に書かれた論理名（例: "physics_book"）
+        data_file:     data_file,          # 単複解決後の実パス（例: "data/physics_books.yml"）
+        data_dir:      data_dir,
+        template_path: template_path,
+        query:         query,
+        location:      location            # "filename:line" 形式
+      }
+      result = post_render.call(rendered, context)
+      result.is_a?(String) ? result : rendered
     end
 
     # テキスト内の QueryStream 記法を検出してリストを返す
