@@ -29,6 +29,10 @@ module QueryStream
   # 行頭 = の直後に英数字/ハイフン/アンダースコアのデータ名（スペースは任意）
   QUERY_STREAM_PATTERN = /^=\s*([a-zA-Z][a-zA-Z0-9_-]*)(?:\s*\|.*)?$/
 
+  # これを超える長さの引数はパスとみなさず本文として扱う（scan の path/content 判定）。
+  # 主要な OS の PATH_MAX は 4096 前後で、それより長い「パス」は実在しない。
+  MAX_PATH_BYTES = 4096
+
   class << self
     # グローバル設定を返す
     # @return [Configuration]
@@ -73,7 +77,7 @@ module QueryStream
         line_number = idx + 1
 
         # コードブロック内はスキップ
-        if line.lstrip.start_with?('```')
+        if code_fence?(line)
           in_code_block = !in_code_block
           result << line
           next
@@ -85,7 +89,7 @@ module QueryStream
         end
 
         # QueryStream 記法の検出
-        if line.match?(QUERY_STREAM_PATTERN)
+        if query_line?(line)
           begin
             expanded = render_query(
               line.chomp, line_number:, source_filename:, data_dir:, templates_dir:, on_warning:, post_render:
@@ -206,25 +210,65 @@ module QueryStream
     # @param path_or_content [String] ファイルパスまたはテキストコンテンツ
     # @return [Array<String>] 検出された QueryStream 記法のリスト
     def scan(path_or_content)
-      content = File.exist?(path_or_content) ? File.read(path_or_content, encoding: 'utf-8') : path_or_content
+      content = readable_file?(path_or_content) ? File.read(path_or_content, encoding: 'utf-8') : path_or_content
       lines = content.lines
       queries = []
       in_code_block = false
 
       lines.each do |line|
-        if line.lstrip.start_with?('```')
+        if code_fence?(line)
           in_code_block = !in_code_block
           next
         end
         next if in_code_block
 
-        queries << line.chomp if line.match?(QUERY_STREAM_PATTERN)
+        queries << line.chomp if query_line?(line)
       end
 
       queries
     end
 
     private
+
+    # その行を QueryStream 記法として扱うか。
+    #
+    # **不正な UTF-8 を含む行は記法として解釈しない。** `match?` はそういう行に
+    # `ArgumentError: invalid byte sequence in UTF-8` を投げるので、素通しにすると
+    # 原稿に 1 バイトの壊れが混ざっただけで展開が丸ごと止まる。
+    # ここでバイト列を書き換えて（scrub して）通す手もあるが採らない——gem が黙って
+    # 原稿のバイト列を変えると、著者が気付けない形で本文が変わる。
+    # 記法として読めない行は本文として、そのまま返すのが正しい。
+    def query_line?(line)
+      line.match?(QUERY_STREAM_PATTERN)
+    rescue ArgumentError
+      false
+    end
+
+    # コードフェンスの開始/終了行か。
+    # `lstrip` も不正な UTF-8 で ArgumentError を投げるので、query_line? と同じく
+    # 「読めない行は本文」へ倒す。ここを素通しにすると、記法判定だけ守っても
+    # 手前のフェンス判定で落ちる。
+    def code_fence?(line)
+      line.lstrip.start_with?('```')
+    rescue ArgumentError
+      false
+    end
+
+    # 引数をファイルパスとして読むべきか。
+    #
+    # `scan` はパスと本文のどちらも受け取る API なので、本文をそのまま
+    # `File.exist?` へ渡すと壊れる——NUL バイトを含めば `ArgumentError`、
+    # ディレクトリなら「存在する」と判定されて `File.read` が `Errno::EISDIR` を出す。
+    # パスとして成立しうる形だけを先に選別し、判定自体の失敗も本文扱いに倒す。
+    def readable_file?(str)
+      s = str.to_s
+      return false if s.empty? || s.include?("\0") || s.include?("\n")
+      return false if s.bytesize > MAX_PATH_BYTES
+
+      File.file?(s)
+    rescue ArgumentError, SystemCallError
+      false
+    end
 
     # テンプレートファイルパスを解決する
     # @param singular_name [String] 単数形のデータ名

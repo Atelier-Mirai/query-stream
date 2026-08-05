@@ -10,6 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - パフォーマンス最適化
 - 追加のテンプレートスタイル
 
+## [Unreleased]
+
+### Changed
+- **必要な Ruby を 4.0 以上から 3.4 以上へ緩めた** (`query-stream.gemspec`): Ruby 4.0 固有の機能は使っていない。Prism のバージョン指定パースで全 14 ファイルを解析したところ 4.0.0 / 3.4.0 / 3.3.0 いずれも構文エラー 0 件で、実際の下限を決めていたのは `it`（暗黙ブロック引数・16 箇所）**単独**だった。`it` は 3.3 でも構文エラーにならず「`it` というメソッドの呼び出し」として通り、実行時に `NameError` になる——静的解析では見つからないので、Ruby 3.4.10 で実走して全テスト通過を確認している。コード変更はゼロ（gemspec 1 行のみ）。
+
+### Fixed
+- **壊れた入力で生の例外が外へ漏れていたのを直した**: いずれも「著者が用意した原稿・データが壊れている」という正当に起こりうる状況で、`QueryStream::Error` 系ではない例外が呼び出し元へ届いていた。呼び出し元は例外型で扱いを分けるため、生の `ArgumentError` / `NoMethodError` が出ると「どのファイルのどこが悪いか」を著者へ案内できない。
+  - **空のデータファイルで `NoMethodError`** (`data_resolver.rb`): YAML が `nil` を返すのを素通ししており、`TemplateCompiler` が `undefined method 'any?' for nil` で落ちていた。`load_records` は**常に配列を返す**契約に正規化した（`@return [Array<Hash>]` という既存の記述に実装を合わせた形）。レコードの配列でもハッシュでもない中身（スカラーだけの YAML）は、何が入っていたかを添えて `DataLoadError` にする。
+  - **不正な UTF-8 を含む原稿で `ArgumentError`** (`query_stream.rb`): `String#match?` も `lstrip` も不正バイト列に対して `invalid byte sequence in UTF-8` を投げるため、原稿に 1 バイトの壊れが混ざっただけで展開が丸ごと止まっていた。読めない行は**本文としてそのまま返す**。scrub して通す設計は採らない——gem が黙ってバイト列を書き換えると、著者が気付けない形で本文が変わる。
+  - **`scan` に本文を渡すと `ArgumentError` / `Errno::EISDIR`** (`query_stream.rb`): `scan` はパスと本文の両方を受け取る API なのに、引数を無条件で `File.exist?` へ渡していた。NUL バイトを含む本文で `path name contains null byte`、ディレクトリ名で `File.exist?` が true を返し `File.read` が `Errno::EISDIR` になっていた。パスとして成立しうる形（NUL・改行を含まず `MAX_PATH_BYTES` 以下で、かつ `File.file?`）だけを読み、判定自体の失敗も本文扱いに倒す。
+
+### Added
+- **堅牢性テストを整備した** (`test/robustness/`): 「正しく使ったとき正しく動くか」を見る既存のユニットテストとは別に、**想定外の入力・環境に対する振る舞い**を固定する 27 件を追加。守る不変条件は「gem の外へ出てよい例外は `QueryStream::Error` の系統だけ」。上記 3 件の修正はいずれもこのテストを書く過程で見つかったもの。
+  - `data_file_safety_test.rb` — `!ruby/object` 等の危険なタグ・壊れた YAML/JSON・空ファイル・レコードでない中身
+  - `broken_encoding_test.rb` — 不正な UTF-8 を含む原稿。**バイト列を書き換えずに返す**ことまで固定
+  - `scan_input_test.rb` — `scan` のパス／本文判定（NUL・改行・超長入力・ディレクトリ）
+  - `missing_source_test.rb` — データ／テンプレート不在時の例外属性と、1 行の失敗で全体を止めないこと。**当てずっぽうの hint を返さない**ことも固定
+  - `unreadable_file_test.rb` — 権限エラーは `DataLoadError` へ包まず `Errno::EACCES` のまま伝える（環境の問題とデータの問題は直し方が違うため）
+
 ## [1.3.0] - 2026-07-12
 
 ### Added

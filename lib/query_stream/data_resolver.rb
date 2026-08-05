@@ -77,8 +77,7 @@ module QueryStream
                                       symbolize_names: true)
                 end
 
-      records = [records] if records.is_a?(Hash)
-      records
+      normalize_records(records, file_path)
     rescue Psych::DisallowedClass => e
       raise DataLoadError.new(
         "データファイルに許可されていないクラス/タグが含まれています: #{e.message} (#{file_path})",
@@ -94,6 +93,30 @@ module QueryStream
         "データファイルの JSON 構文エラー: #{e.message} (#{file_path})",
         file_path: file_path, cause_error: e
       )
+    end
+
+    # 読み込み結果をレコード配列へ正規化する。
+    #
+    # **常に配列を返すのが本メソッドの契約である。** 空のデータファイルは YAML が
+    # `nil` を返すため、素通しすると呼び出し先（TemplateCompiler）が
+    # `undefined method 'any?' for nil` で落ちる——データを空にしただけの著者に
+    # NoMethodError を見せることになる。
+    #
+    # 配列でもハッシュでもない中身（先頭が文字列や数値だけの YAML）は、
+    # レコード群として解釈しようがないので DataLoadError で理由を伝える。
+    # @return [Array<Hash>]
+    def normalize_records(records, file_path)
+      case records
+      when nil then []
+      when Hash then [records]
+      when Array then records
+      else
+        raise DataLoadError.new(
+          "データファイルはレコードの配列（またはハッシュ 1 件）である必要があります" \
+          "（#{records.class} が入っています）: #{file_path}",
+          file_path: file_path
+        )
+      end
     end
 
     # 指定名ですべての拡張子を試行する
