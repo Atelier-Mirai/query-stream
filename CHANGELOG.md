@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - パフォーマンス最適化
 - 追加のテンプレートスタイル
 
-## [1.4.0] - 2026-08-06
+## [1.4.0] - 2026-08-07
 
 ### Removed
 - **`QueryStream.logger` と `Configuration#logger` を削除した** (`query_stream.rb`, `configuration.rb`, `query-stream.gemspec`): 下記の `logger.error` 撤去により、gem 内でロガーを読む箇所がゼロになった。設定できるのに何も起きない項目は、利用者に「ログ出力を制御できる」という誤った期待を持たせるだけなので残さない。`logger` gem への依存も外した。
