@@ -436,6 +436,37 @@ class TemplateCompilerTest < Minitest::Test
     end
   end
 
+  # 打ち間違えたキーのエラーは「代わりに何が使えるか」まで持って伝わる。
+  # 呼び出し元が「もしかして =title?」を組み立てられることが目的
+  def test_should_carry_available_keys_on_unknown_key_error
+    template = "### = titel\n"
+    records = [{ title: '楽しいRuby', author: '高橋征義' }]
+
+    error = assert_raises(QueryStream::UnknownKeyError) do
+      Compiler.render(template, records, source_filename: 'chapter.md', line_number: 12,
+                                         template_path: 'templates/_book.md')
+    end
+
+    assert_equal 'titel', error.key_path
+    assert_equal %i[title author], error.available_keys
+    assert_equal 'chapter.md:12', error.location
+    # 直すのは雛形なので、記法の位置（location）とは別に雛形の位置も要る
+    assert_equal 'templates/_book.md', error.template_path
+  end
+
+  # 画像記法の中で打ち間違えた場合も同じ属性が揃う
+  def test_should_carry_available_keys_when_unknown_key_is_in_image_notation
+    template = "![](covr)\n"
+    records = [{ title: '楽しいRuby', cover: 'ruby.webp' }]
+
+    error = assert_raises(QueryStream::UnknownKeyError) do
+      Compiler.render(template, records, source_filename: 'chapter.md', line_number: 3)
+    end
+
+    assert_equal 'covr', error.key_path
+    assert_equal %i[title cover], error.available_keys
+  end
+
   # レコードが空の場合は空文字列を返す
   def test_should_return_empty_for_no_records
     template = "### = title\n"

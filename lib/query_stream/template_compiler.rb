@@ -51,10 +51,11 @@ module QueryStream
     # @param records [Array<Hash>] データレコード群
     # @param source_filename [String, nil] エラー報告用ファイル名
     # @param line_number [Integer, nil] エラー報告用行番号
+    # @param template_path [String, nil] エラー報告用テンプレートパス（キーの打ち間違いはここを直す）
     # @return [String] 展開後のテキスト
-    def render(template, records, source_filename: nil, line_number: nil)
+    def render(template, records, source_filename: nil, line_number: nil, template_path: nil)
       lines = template.lines
-      validate_template_keys!(lines, records.first, source_filename:, line_number:) if records.any?
+      validate_template_keys!(lines, records.first, source_filename:, line_number:, template_path:) if records.any?
 
       parts = classify_lines(lines)
       return '' if records.empty?
@@ -306,7 +307,8 @@ module QueryStream
     # @param sample_record [Hash] サンプルレコード（最初の1件）
     # @param source_filename [String, nil] エラー報告用ファイル名
     # @param line_number [Integer, nil] エラー報告用行番号
-    def validate_template_keys!(lines, sample_record, source_filename: nil, line_number: nil)
+    # @param template_path [String, nil] エラー報告用テンプレートパス
+    def validate_template_keys!(lines, sample_record, source_filename: nil, line_number: nil, template_path: nil)
       return unless sample_record
 
       location = source_filename ? "#{source_filename}:#{line_number}" : ''
@@ -327,10 +329,7 @@ module QueryStream
         line.scan(VARIABLE_PATTERN).each do |(key_path)|
           root_key = key_path.split('.').first.to_sym
           unless available_keys.include?(root_key)
-            msg = "テンプレートに存在しないキーが記述されています: #{key_path}"
-            QueryStream.logger.error("#{msg}(#{location})")
-            QueryStream.logger.error("  利用可能なキー: #{available_keys.join(', ')}")
-            raise UnknownKeyError, msg
+            raise UnknownKeyError.new(key_path:, available_keys:, template_path:, location:)
           end
         end
 
@@ -341,10 +340,7 @@ module QueryStream
 
           root_key = src.split('.').first.to_sym
           unless available_keys.include?(root_key)
-            msg = "テンプレートに存在しないキーが記述されています: #{src}"
-            QueryStream.logger.error("#{msg}(#{location})")
-            QueryStream.logger.error("  利用可能なキー: #{available_keys.join(', ')}")
-            raise UnknownKeyError, msg
+            raise UnknownKeyError.new(key_path: src, available_keys:, template_path:, location:)
           end
         end
       end

@@ -46,12 +46,6 @@ module QueryStream
       yield(configuration)
     end
 
-    # ロガーへのショートカット
-    # @return [Logger]
-    def logger
-      configuration.logger
-    end
-
     # テキストコンテンツ内の QueryStream 記法をすべて展開する
     # 1行の展開に失敗しても残りの行の処理を継続する。
     # エラー情報は例外の属性として呼び出し元に委ねる（gem 内ではログ出力しない）。
@@ -187,7 +181,7 @@ module QueryStream
       template_content = File.read(template_path, encoding: 'utf-8')
 
       # --- Phase: Render ---
-      rendered = TemplateCompiler.render(template_content, records, source_filename:, line_number:)
+      rendered = TemplateCompiler.render(template_content, records, source_filename:, line_number:, template_path:)
 
       # --- Phase: Post-render filter ---
       # 展開結果を呼び出し元の後段フィルタへ通す（画像パス解決など gem 外の後処理）。
@@ -238,9 +232,13 @@ module QueryStream
     # ここでバイト列を書き換えて（scrub して）通す手もあるが採らない——gem が黙って
     # 原稿のバイト列を変えると、著者が気付けない形で本文が変わる。
     # 記法として読めない行は本文として、そのまま返すのが正しい。
+    #
+    # EncodingError と ArgumentError の両方を捕まえるのは意図的である。壊れたバイト列に
+    # Ruby がどちらを投げるかはメソッド次第で（match? / 先頭破損の lstrip は ArgumentError、
+    # strip は Encoding::CompatibilityError）、その差で展開が止まってはならない。
     def query_line?(line)
       line.match?(QUERY_STREAM_PATTERN)
-    rescue ArgumentError
+    rescue EncodingError, ArgumentError
       false
     end
 
@@ -250,7 +248,7 @@ module QueryStream
     # 手前のフェンス判定で落ちる。
     def code_fence?(line)
       line.lstrip.start_with?('```')
-    rescue ArgumentError
+    rescue EncodingError, ArgumentError
       false
     end
 

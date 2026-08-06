@@ -10,9 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - パフォーマンス最適化
 - 追加のテンプレートスタイル
 
-## [Unreleased]
+## [1.4.0] - 2026-08-06
+
+### Removed
+- **`QueryStream.logger` と `Configuration#logger` を削除した** (`query_stream.rb`, `configuration.rb`, `query-stream.gemspec`): 下記の `logger.error` 撤去により、gem 内でロガーを読む箇所がゼロになった。設定できるのに何も起きない項目は、利用者に「ログ出力を制御できる」という誤った期待を持たせるだけなので残さない。`logger` gem への依存も外した。
+  - **破壊的変更**: `config.logger = ...` を書いているコードは削除が必要（設定しても何も起きないため、消すだけでよい）。
+  - 唯一の利用者である vivlio-starter は `QueryStream.configure` 自体を使っておらず、影響は無い。
 
 ### Changed
+- **`UnknownKeyError` を構造化例外にし、gem 内に最後まで残っていた `logger.error` を撤去した** (`errors.rb`, `template_compiler.rb`): 1.1.0 で `logger.error`、1.2.0 で `logger.warn` を廃したが、`TemplateCompiler` がテンプレートのキーを検証する 2 箇所にだけ `logger.error` が残っており、「gem 内のログ出力を全廃した」という設計が最後まで通っていなかった。`UnknownKeyError` は属性を 1 つも持たなかったため、**呼び出し元は「利用できるキーの一覧」を受け取れず**、gem が直接吐くログに頼るしかなかったのが原因である。`key_path` / `available_keys` / `template_path` / `location` を持たせ、ログ出力を削除した。これで呼び出し元は「もしかして `=title`?」のような案内を自前で組み立てられる。
+  - `location`（記法が書かれた原稿の位置）と `template_path`（打ち間違いがある雛形の位置）は別物として持つ。**直すのは雛形**なので、記法の位置だけでは著者はファイルを開けない。
+  - `TemplateCompiler.render` に `template_path:` キーワードを追加した（任意・既定 `nil`）。
 - **必要な Ruby を 4.0 以上から 3.4 以上へ緩めた** (`query-stream.gemspec`): Ruby 4.0 固有の機能は使っていない。Prism のバージョン指定パースで全 14 ファイルを解析したところ 4.0.0 / 3.4.0 / 3.3.0 いずれも構文エラー 0 件で、実際の下限を決めていたのは `it`（暗黙ブロック引数・16 箇所）**単独**だった。`it` は 3.3 でも構文エラーにならず「`it` というメソッドの呼び出し」として通り、実行時に `NameError` になる——静的解析では見つからないので、Ruby 3.4.10 で実走して全テスト通過を確認している。コード変更はゼロ（gemspec 1 行のみ）。
 
 ### Fixed

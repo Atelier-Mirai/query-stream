@@ -51,7 +51,32 @@ module QueryStream
     end
   end
 
-  class UnknownKeyError  < Error; end    # テンプレート内に存在しないキー
+  # テンプレートに、データレコードが持たないキーが書かれている
+  #
+  # 「どのキーが無いか」だけでなく「代わりに何が使えるか」「どのファイルを直すか」まで
+  # 属性で渡す。呼び出し元はこれを使って「もしかして =author?」のような案内を組み立てられる。
+  # 属性が無かった頃はこのクラスだけが gem 内で logger.error を呼んでおり、
+  # 利用できるキーの一覧を呼び出し元が受け取れなかった。
+  #
+  # location（記法の位置）と template_path（雛形の位置）は別物である。
+  # 直すのは雛形なので、記法の位置だけでは著者はファイルを開けない。
+  #
+  # @attr_reader key_path [String] テンプレートに書かれていたキー（"author.name" 等）
+  # @attr_reader available_keys [Array<Symbol>] レコードが実際に持つキー
+  # @attr_reader template_path [String, nil] 打ち間違いがあるテンプレートのパス
+  # @attr_reader location [String] 記法が書かれていたソースファイル名と行番号
+  class UnknownKeyError < Error
+    attr_reader :key_path, :available_keys, :template_path, :location
+
+    def initialize(msg = nil, key_path: nil, available_keys: [], template_path: nil, location: nil)
+      super(msg || "テンプレートに存在しないキーが記述されています: #{key_path}")
+      @key_path       = key_path
+      @available_keys = Array(available_keys)
+      @template_path  = template_path
+      @location       = location
+    end
+  end
+
   class InvalidDateError < Error; end    # 無効な日付
 
   # データファイルの読み込みに失敗した

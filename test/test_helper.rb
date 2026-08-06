@@ -5,7 +5,4 @@ require 'query_stream'
 require 'minitest/autorun'
 require 'minitest/pride'
 
-# テスト用のロガー（出力を抑制）
-QueryStream.configure do |config|
-  config.logger = Logger.new(File::NULL)
-end
+# ログ出力の抑制は不要。gem はログを出さず、失敗は例外として呼び出し元へ渡す。
