@@ -38,12 +38,19 @@ result = QueryStream.render(source, data_dir: 'data', templates_dir: 'templates'
 ```
 = books                           # 全件展開
 = books | tags=ruby               # タグで絞り込み
+= books | +title                  # タイトルの昇順
+= books | -year                   # 発行年の降順
 = books | tags=ruby | -title | 5  # 絞り込み＋降順ソート＋5件
 = book | 楽しいRuby               # 主キーで一件検索
 = books | :full                   # fullスタイルで展開
 ```
 
-### 具体例：vivlio-style での書籍データ展開
+**ソートには符号を必ず付けてください**（`+` が昇順、`-` が降順）。符号を省いた
+`= books | title` はソートではなく**主キー検索**として扱われ、該当なしの警告とともに
+何も展開されません。`= book | 楽しいRuby` のような一件検索と綴りが同じになるため、
+符号の有無で見分けています。
+
+### 具体例：Vivlio Starter での書籍データ展開
 
 #### データファイル例 (`data/books.yml`)
 

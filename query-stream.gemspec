@@ -32,6 +32,7 @@ Gem::Specification.new do |spec|
   # Development dependencies
   spec.add_development_dependency 'bundler'
   spec.add_development_dependency 'rake', '~> 13.2'
-  spec.add_development_dependency 'minitest', '~> 5.22'
+  spec.add_development_dependency 'minitest', '>= 5.22'
+  spec.add_development_dependency 'rubocop', '~> 1.81'
   spec.metadata['rubygems_mfa_required'] = 'false'
 end

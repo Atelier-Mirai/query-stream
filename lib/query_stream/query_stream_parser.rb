@@ -137,16 +137,20 @@ module QueryStream
       tokens
     end
 
-    # ソート指定をパースする
-    # @param token [String] "-title" / "+title" / "title"
+    # ソート指定をパースする。
+    #
+    # **符号は必須である。** 呼び出し側（parse_segment）が `+` か `-` で始まることを
+    # 確かめてから渡す。素の `title` はソートではなく主キー検索として扱う——
+    # `= book | 楽しいRuby` と見分ける手掛かりが無くなるためで、符号の有無が
+    # その唯一の目印になっている。
+    #
+    # ここにはかつて「`+` を省略できる」分岐（`\A\+?`）があったが、上の振り分けを
+    # 通る限り符号なしの綴りは届かず、一度も実行されないまま残っていた。
+    #
+    # @param token [String] "-title" / "+title"
     # @return [Hash] { field:, direction: }
     def parse_sort(token)
-      case token
-      in /\A-(.+)\z/
-        { field: $1.to_sym, direction: :desc }
-      in /\A\+?(.+)\z/
-        { field: $1.to_sym, direction: :asc }
-      end
+      { field: token[1..].to_sym, direction: token.start_with?('-') ? :desc : :asc }
     end
 
     # 直前フィールドを引き継いで値のみの条件をパースする
