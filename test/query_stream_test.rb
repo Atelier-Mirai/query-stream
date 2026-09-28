@@ -718,6 +718,21 @@ class FilterEngineTest < Minitest::Test
     assert_equal ['B'], names_for.call('R06-01-02')
   end
 
+  # 日付の範囲指定が、西暦でも和暦でも効く（両端を日付として比べる）
+  def test_should_filter_by_date_range
+    records = [
+      { name: 'A', date: Date.new(2024, 5, 31) },
+      { name: 'B', date: '2024-06-15' },
+      { name: 'C', date: 'R06-06-30' },
+      { name: 'D', date: '2024-07-01' }
+    ]
+    names_for = ->(range) { Engine.apply_filters(records, [{ field: :date, op: :range, value: range }]).map { it[:name] } }
+
+    assert_equal %w[B C], names_for.call('2024-06-01'..'2024-06-30')
+    assert_equal %w[B C], names_for.call('R06-06-01'..'R06-06-30')
+    assert_equal %w[B], names_for.call('2024-06-01'...'2024-06-30')
+  end
+
   # 存在しない和暦の日付は、比較のときに InvalidDateError で知らせる
   def test_should_raise_on_invalid_wareki_date
     records = [{ name: 'A', date: 'R06-02-30' }]

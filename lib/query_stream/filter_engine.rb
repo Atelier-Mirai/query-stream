@@ -69,8 +69,11 @@ module QueryStream
       when :lte
         to_comparable(field_value) <= to_comparable(filter[:value])
       when :range
+        # 両端も比較用にそろえる。パーサーは "2024-06-01".."2024-06-30" のような
+        # 文字列の範囲を返すので、そのままでは Date の値を含まない。
         range = filter[:value]
-        range.cover?(to_comparable(field_value))
+        Range.new(to_comparable(range.begin), to_comparable(range.end), range.exclude_end?)
+             .cover?(to_comparable(field_value))
       else
         false
       end
