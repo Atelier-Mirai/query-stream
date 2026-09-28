@@ -681,6 +681,52 @@ class FilterEngineTest < Minitest::Test
     assert_equal ['C'], names_for.call('x_1')
   end
 
+  # 和暦の日付（R06-01-01）を西暦の日付と同じく大小比較できる
+  def test_should_compare_wareki_dates_with_seireki_dates
+    records = [
+      { name: 'A', date: 'H30-12-31' },
+      { name: 'B', date: 'R06-01-01' },
+      { name: 'C', date: Date.new(2024, 6, 1) }
+    ]
+    filters = [{ field: :date, op: :gte, value: '2024-01-01' }]
+
+    names = Engine.apply_filters(records, filters).map { it[:name] }
+
+    assert_equal %w[B C], names
+  end
+
+  # 和暦と西暦が混ざっていても日付順に並ぶ（年 1 桁の R6 も読む）
+  def test_should_sort_mixed_wareki_and_seireki_dates
+    records = [
+      { name: 'A', date: 'R6-03-01' },
+      { name: 'B', date: '2019-05-01' },
+      { name: 'C', date: 'S64-01-07' },
+      { name: 'D', date: 'H31-04-30' }
+    ]
+
+    names = Engine.apply_sort(records, { field: :date, direction: :asc }).map { it[:name] }
+
+    assert_equal %w[C D B A], names
+  end
+
+  # 等値条件でも和暦と西暦を同じ日として扱う
+  def test_should_match_eq_between_wareki_and_seireki
+    records = [{ name: 'A', date: 'R06-01-01' }, { name: 'B', date: '2024-01-02' }]
+    names_for = ->(value) { Engine.apply_filters(records, [{ field: :date, op: :eq, value: [value] }]).map { it[:name] } }
+
+    assert_equal ['A'], names_for.call('2024-01-01')
+    assert_equal ['B'], names_for.call('R06-01-02')
+  end
+
+  # 存在しない和暦の日付は、比較のときに InvalidDateError で知らせる
+  def test_should_raise_on_invalid_wareki_date
+    records = [{ name: 'A', date: 'R06-02-30' }]
+
+    assert_raises(QueryStream::InvalidDateError) do
+      Engine.apply_filters(records, [{ field: :date, op: :gte, value: '2024-01-01' }])
+    end
+  end
+
   # ソートが動作する（昇順）
   def test_should_sort_asc
     records = [

@@ -13,6 +13,13 @@ require 'date'
 module QueryStream
   # フィルタリング＆ソートエンジンモジュール
   module FilterEngine
+    # 西暦の日付（2024-01-01）
+    SEIREKI_DATE = /\A\d{4}-\d{2}-\d{2}\z/
+
+    # 和暦の日付（R06-01-01）。元号は頭文字で書く（M 明治・T 大正・S 昭和・H 平成・R 令和）。
+    # 年は 1 桁でもよい（R6-01-01）。
+    WAREKI_DATE = /\A(?<era>[MTSHR])(?<year>\d{1,2})-(?<month>\d{2})-(?<day>\d{2})\z/
+
     module_function
 
     # フィルタ条件をレコード群に適用する
@@ -82,13 +89,23 @@ module QueryStream
     # 等値比較（配列・カンマ区切り文字列を透過的に扱う）
     # データ側が配列/カンマ区切りの場合、ORの値リストと交差判定する
     def match_eq(field_value, filter_values)
-      # 桁区切りは両側で外す。条件側だけ外すと、データに "2024_01" のような
-      # 文字列があるとき、同じ綴りの条件で一致しなくなる。
-      field_list = normalize_to_list(field_value).map { QueryStreamParser.strip_digit_separators(it) }
-      value_list = Array(filter_values).map { QueryStreamParser.strip_digit_separators(it.to_s.strip) }
+      # 綴りの揺れは両側でそろえる。条件側だけそろえると、データに "2024_01" や
+      # "R06-01-01" のような文字列があるとき、同じ綴りの条件で一致しなくなる。
+      field_list = normalize_to_list(field_value).map { canonical_token(it) }
+      value_list = Array(filter_values).map { canonical_token(it.to_s.strip) }
 
       # フィールド側の値リストと条件値リストに交差があれば一致
       (field_list & value_list).any?
+    end
+
+    # 等値比較のため、値を綴りの揺れのない形へそろえる。
+    # 数は桁区切りを外し（9_000_000 → 9000000）、日付は西暦にする（R06-01-01 → 2024-01-01）。
+    # 存在しない日付は、等値比較ではこれまでどおり文字列のまま比べる。
+    def canonical_token(str)
+      date = parse_date(str)
+      date ? date.iso8601 : QueryStreamParser.strip_digit_separators(str)
+    rescue InvalidDateError
+      str
     end
 
     # フィールド値をリスト化する（配列/カンマ区切り/単値を統一）
@@ -105,20 +122,31 @@ module QueryStream
       end
     end
 
+    # 西暦・和暦の日付を Date に直す。日付の形でなければ nil を返す。
+    # 和暦は Date.jisx0301 に任せる。Date.parse は "R06-01-01" を 2006-01-01 と
+    # 読み違えるので使えない。jisx0301 の区切りはドットで、年は 2 桁が要る。
+    # 元号の境目は検査しない（H31-05-01 も 2019-05-01 として読む）。
+    # @raise [InvalidDateError] 日付の形だが存在しない日（2024-02-30 など）
+    def parse_date(value)
+      if value.match?(SEIREKI_DATE)
+        Date.parse(value)
+      elsif (m = value.match(WAREKI_DATE))
+        Date.jisx0301("#{m[:era]}#{m[:year].rjust(2, '0')}.#{m[:month]}.#{m[:day]}")
+      end
+    rescue Date::Error
+      raise InvalidDateError, "無効な日付: #{value}"
+    end
+
     # 比較用に値を正規化する（数値変換・日付変換を試みる）
     def to_comparable(value)
       case value
       when Date, Time
         value
       when String
-        # 日付形式（YYYY-MM-DD）を検出して Date に変換
-        if value.match?(/\A\d{4}-\d{2}-\d{2}\z/)
-          begin
-            return Date.parse(value)
-          rescue Date::Error
-            raise InvalidDateError, "無効な日付: #{value}"
-          end
-        end
+        # 日付形式（西暦・和暦）を検出して Date に変換
+        date = parse_date(value)
+        return date if date
+
         # 数値変換を試みる
         case value
         when /\A-?\d+\z/

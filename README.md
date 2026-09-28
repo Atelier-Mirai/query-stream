@@ -42,6 +42,7 @@ result = QueryStream.render(source, data_dir: 'data', templates_dir: 'templates'
 = books | -year                   # 発行年の降順
 = books | tags=ruby | -title | 5  # 絞り込み＋降順ソート＋5件
 = prefectures | population>=9_000_000  # 数は _ で桁を区切れる（900_0000 も可）
+= weather_reports | date>=R06-01-01    # 日付は西暦（2024-01-01）でも和暦でも書ける
 = book | 楽しいRuby               # 主キーで一件検索
 = books | :full                   # fullスタイルで展開
 ```
@@ -50,6 +51,10 @@ result = QueryStream.render(source, data_dir: 'data', templates_dir: 'templates'
 `= books | title` はソートではなく**主キー検索**として扱われ、該当なしの警告とともに
 何も展開されません。`= book | 楽しいRuby` のような一件検索と綴りが同じになるため、
 符号の有無で見分けています。
+
+日付は、データでも抽出条件でも `2024-01-01`（西暦）か `R06-01-01`（和暦）で書きます。
+和暦の元号は頭文字で書き（`M` 明治・`T` 大正・`S` 昭和・`H` 平成・`R` 令和）、年は 1 桁でも
+構いません（`R6-01-01`）。どちらで書いても同じ日付として比べ、並べ替えます。
 
 ### 具体例：Vivlio Starter での書籍データ展開
 
