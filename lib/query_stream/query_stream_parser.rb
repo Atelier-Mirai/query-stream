@@ -27,6 +27,11 @@ module QueryStream
     # AND 条件の区切りパターン
     AND_PATTERN = /\s+(?:AND|and|&&)\s+/
 
+    # 桁をアンダースコアで区切った数（9_000_000 / 900_0000 / 1_234.5）。
+    # Ruby の数値リテラルと同じく、区切りは数字と数字のあいだにだけ置ける。
+    # 区切り方は問わないので、万の位で区切る 900_0000 も書ける。
+    NUMBER_WITH_SEPARATORS = /\A-?\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?\z/
+
     module_function
 
     # QueryStream 記法をパースして構造化ハッシュを返す
@@ -259,12 +264,19 @@ module QueryStream
     # @param str [String] "20" / "3.14" / "東京"
     # @return [Integer, Float, String] 変換後の値
     def parse_numeric(str)
-      s = str.strip
+      s = strip_digit_separators(str.strip)
       case s
       when /\A-?\d+\z/    then s.to_i
       when /\A-?\d+\.\d+\z/ then s.to_f
       else s
       end
+    end
+
+    # 数の桁区切り（アンダースコア）を外す。数でない値（tag_name など）はそのまま返す。
+    # @param str [String] "9_000_000" / "ruby"
+    # @return [String] "9000000" / "ruby"
+    def strip_digit_separators(str)
+      str.match?(NUMBER_WITH_SEPARATORS) ? str.delete('_') : str
     end
 
     # 主キー候補フィールドによる一件検索フィルタを構築する

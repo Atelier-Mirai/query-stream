@@ -240,6 +240,21 @@ class QueryStreamParserTest < Minitest::Test
     assert_equal 25,  filter[:value]
   end
 
+  # 数の桁をアンダースコアで区切れる（区切り方は問わない）
+  def test_should_parse_numbers_with_digit_separators
+    assert_equal 9_000_000, Parser.parse('= prefectures | population>=9_000_000')[:filters].first[:value]
+    assert_equal 9_000_000, Parser.parse('= prefectures | population=900_0000..')[:filters].first[:value]
+    assert_equal 1_000..2_000, Parser.parse('= prefectures | population=1_000..2_000')[:filters].first[:value]
+    assert_in_delta 1234.5, Parser.parse('= items | price<1_234.5')[:filters].first[:value]
+  end
+
+  # 数でない値のアンダースコアは外さない（フィールド値の綴りを変えない）
+  def test_should_keep_underscores_in_non_numeric_values
+    assert_equal 'snake_case', Parser.parse('= items | code>=snake_case')[:filters].first[:value]
+    assert_equal '1__0', Parser.parse('= items | code>=1__0')[:filters].first[:value]
+    assert_equal '_1', Parser.parse('= items | code>=_1')[:filters].first[:value]
+  end
+
   # 主キー検索をパースできる
   def test_should_parse_primary_key_lookup
     result = Parser.parse('= book | 楽しいRuby')
@@ -651,6 +666,21 @@ class FilterEngineTest < Minitest::Test
     assert_equal 'A', result.first[:name]
   end
 
+  # 等値条件でも桁区切りを外して比べる（データ側の数とも、区切った文字列とも一致する）
+  def test_should_match_eq_ignoring_digit_separators
+    records = [
+      { name: 'A', code: 2024_01 },
+      { name: 'B', code: '2024_02' },
+      { name: 'C', code: 'x_1' }
+    ]
+
+    names_for = ->(value) { Engine.apply_filters(records, [{ field: :code, op: :eq, value: [value] }]).map { it[:name] } }
+
+    assert_equal ['A'], names_for.call('2024_01')
+    assert_equal ['B'], names_for.call('2024_02')
+    assert_equal ['C'], names_for.call('x_1')
+  end
+
   # ソートが動作する（昇順）
   def test_should_sort_asc
     records = [
@@ -1025,6 +1055,15 @@ class QueryStreamIntegrationTest < Minitest::Test
   def test_should_filter_prefectures_by_population_gte
     content = "= prefectures | population>=9000000\n"
     result = render(content)
+
+    assert_includes result, '東京都'
+    assert_includes result, '神奈川県'
+    refute_includes result, '北海道'
+  end
+
+  # 桁を区切った人口でも同じ結果になる（万の位で区切る書き方も可）
+  def test_should_filter_prefectures_by_population_with_digit_separators
+    result = render("= prefectures | population=900_0000..\n")
 
     assert_includes result, '東京都'
     assert_includes result, '神奈川県'

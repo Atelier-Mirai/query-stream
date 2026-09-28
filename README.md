@@ -41,6 +41,7 @@ result = QueryStream.render(source, data_dir: 'data', templates_dir: 'templates'
 = books | +title                  # タイトルの昇順
 = books | -year                   # 発行年の降順
 = books | tags=ruby | -title | 5  # 絞り込み＋降順ソート＋5件
+= prefectures | population>=9_000_000  # 数は _ で桁を区切れる（900_0000 も可）
 = book | 楽しいRuby               # 主キーで一件検索
 = books | :full                   # fullスタイルで展開
 ```

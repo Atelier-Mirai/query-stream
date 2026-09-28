@@ -82,8 +82,10 @@ module QueryStream
     # 等値比較（配列・カンマ区切り文字列を透過的に扱う）
     # データ側が配列/カンマ区切りの場合、ORの値リストと交差判定する
     def match_eq(field_value, filter_values)
-      field_list = normalize_to_list(field_value)
-      value_list = Array(filter_values).map { it.to_s.strip }
+      # 桁区切りは両側で外す。条件側だけ外すと、データに "2024_01" のような
+      # 文字列があるとき、同じ綴りの条件で一致しなくなる。
+      field_list = normalize_to_list(field_value).map { QueryStreamParser.strip_digit_separators(it) }
+      value_list = Array(filter_values).map { QueryStreamParser.strip_digit_separators(it.to_s.strip) }
 
       # フィールド側の値リストと条件値リストに交差があれば一致
       (field_list & value_list).any?
