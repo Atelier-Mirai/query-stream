@@ -9,6 +9,8 @@
 #
 # 変換ルール:
 #   - `= key` のみの行 → key の値を展開（nil/空文字なら行スキップ）
+#   - `= key` が 2 つ以上ある行 → 区切り（／・、，,）と括弧で部品に分け、
+#     空のキーを含む部品だけを消す（部品が全部消えたら行スキップ。表の行は対象外）
 #   - `prefix = key` → prefix を残してkey の値を展開
 #   - `![](key)` → 変数展開（拡張子なし → 変数、拡張子あり → リテラル）
 #   - `= key` を含まない行 → リテラル出力（ヘッダー等は一度だけ出力）
@@ -44,6 +46,21 @@ module QueryStream
     # VFM フェンス終了行: 単独の :::
     FENCE_CLOSE_PATTERN = /\A:::\s*\z/
 
+    # 部品の区切り: 全角の斜線・中黒・読点・コンマと半角のコンマ（前後の空白ごと）、
+    # 前後に空白のある半角の斜線。空白なしの半角の斜線を区切りにしないのは、
+    # URL（https://example.com/books/= id）を割らないため。
+    PART_SEPARATOR = %r{\s*[／・、，,]\s*|\s+/\s+}
+
+    # 変数を含みうる括弧（全角・半角）。中身ごと 1 つの部品として扱う（直前の空白も含める）。
+    # `]` の直後の括弧は Markdown のリンク先（`[= title](= url)`）なので含めない。
+    OPTIONAL_GROUP = /\s*(?<!\])[（(][^（）()]*[）)]/
+
+    # 行頭の Markdown の目印（箇条書き・番号・引用・見出し）。部品が消えても残す。
+    LINE_MARKER = /\A\s*(?:(?:[-*+]|\d+\.)\s+|>\s?|\#{1,6}\s+)*/
+
+    # 括弧を部品として退避するときの目印（テンプレートに現れない制御文字で挟む）
+    GROUP_PLACEHOLDER = /\u0000(\d+)\u0000/
+
     module_function
 
     # テンプレートにレコード群を流し込んでテキストを生成する
@@ -55,7 +72,7 @@ module QueryStream
     # @return [String] 展開後のテキスト
     def render(template, records, source_filename: nil, line_number: nil, template_path: nil)
       lines = template.lines
-      validate_template_keys!(lines, records.first, source_filename:, line_number:, template_path:) if records.any?
+      validate_template_keys!(lines, records, source_filename:, line_number:, template_path:) if records.any?
 
       parts = classify_lines(lines)
       return '' if records.empty?
@@ -270,10 +287,72 @@ module QueryStream
     end
 
     # = key パターンの変数を展開する（ドット記法対応）
+    #
+    # 変数が 2 つ以上ある行は、空のキーを含む部品だけを消す（expand_parts）。
+    # `= author.name 著／= publisher／= year 年` で発行年だけが無い本でも、著者と出版社は出る。
+    # 変数が 1 つの行と表の行（セルを消すと列がずれる）は、空なら行ごと消す。
     # @param line [String] テンプレート行
     # @param record [Hash] データレコード
     # @return [String, nil] 展開後の行、またはスキップ時 nil
     def expand_variables(line, record)
+      return expand_parts(line, record) if partial_line?(line)
+
+      expand_whole(line, record)
+    end
+
+    # 部品ごとに消せる行か。変数が 2 つ以上あり、表の行でないもの。
+    def partial_line?(line)
+      !line.lstrip.start_with?('|') && line.scan(VARIABLE_PATTERN).size >= 2
+    end
+
+    # 区切りと括弧で行を部品に分け、空のキーを含む部品だけを消す。
+    #
+    # - 変数を含む括弧（`（= year 年）`）は 1 つの部品。空なら直前の空白ごと消す。
+    # - 括弧の外は PART_SEPARATOR で分ける。残った部品は、前の部品の後ろにあった区切りでつなぐ。
+    # - 行頭の Markdown の目印（`- ` など）と行末の改行は、部品が消えても残す。
+    # - 変数を含む部品が 1 つも残らなければ nil（行ごと消す）。
+    # キーがすべて埋まっていれば、区切りも括弧も元のまま戻るので、出力は expand_whole と同じになる。
+    # @param line [String] テンプレート行
+    # @param record [Hash] データレコード
+    # @return [String, nil] 展開後の行、またはスキップ時 nil
+    def expand_parts(line, record)
+      newline = line[/\R\z/].to_s
+      body = line.chomp
+      marker = body[LINE_MARKER]
+      body = body.delete_prefix(marker)
+
+      groups = []
+      masked = body.gsub(OPTIONAL_GROUP) do |group|
+        next group unless group.match?(VARIABLE_PATTERN)
+
+        groups << group
+        "\u0000#{groups.size - 1}\u0000"
+      end
+
+      kept = masked.split(/(#{PART_SEPARATOR})/).each_slice(2).filter_map do |part, separator|
+        text = expand_part(part, groups, record)
+        text && [text, separator.to_s, variable_part?(part)]
+      end
+      return nil unless kept.any? { |_, _, variable| variable }
+
+      joined = kept.each_with_index.map { |(text, separator, _), i| i == kept.size - 1 ? text : text + separator }.join
+      "#{marker}#{joined}#{newline}"
+    end
+
+    # 部品 1 つを展開する。空のキーを含めば nil。括弧は中のキーが空ならそこだけ消す。
+    # 括弧の外を先に展開するのは、値の中の `= …` をもう一度展開しないため（括弧は退避中）。
+    def expand_part(part, groups, record)
+      outer = expand_whole(part, record)
+      return nil unless outer
+
+      text = outer.gsub(GROUP_PLACEHOLDER) { expand_whole(groups[::Regexp.last_match(1).to_i], record).to_s }
+      text.strip.empty? ? nil : text
+    end
+
+    def variable_part?(part) = part.match?(VARIABLE_PATTERN) || part.match?(GROUP_PLACEHOLDER)
+
+    # 行の変数をすべて展開する。空のキーが 1 つでもあれば nil（行ごと消す）。
+    def expand_whole(line, record)
       result = line.dup
 
       result.gsub!(VARIABLE_PATTERN) do |_match|
@@ -303,16 +382,19 @@ module QueryStream
     end
 
     # テンプレート内のキーがデータに存在するかを検証する
+    #
+    # どれか 1 件にでもあるキーは正しいキーとみなす。省ける項目（発行年など）が最初の 1 件に
+    # 無いだけで、打ち間違いとして止めないため。値の無い件では、その行・部品を消す（expand_variables）。
     # @param lines [Array<String>] テンプレートの行リスト
-    # @param sample_record [Hash] サンプルレコード（最初の1件）
+    # @param records [Array<Hash>] レコード群
     # @param source_filename [String, nil] エラー報告用ファイル名
     # @param line_number [Integer, nil] エラー報告用行番号
     # @param template_path [String, nil] エラー報告用テンプレートパス
-    def validate_template_keys!(lines, sample_record, source_filename: nil, line_number: nil, template_path: nil)
-      return unless sample_record
+    def validate_template_keys!(lines, records, source_filename: nil, line_number: nil, template_path: nil)
+      available_keys = records.flat_map(&:keys).uniq
+      return if available_keys.empty?
 
       location = source_filename ? "#{source_filename}:#{line_number}" : ''
-      available_keys = sample_record.keys
       in_code_block = false
 
       lines.each do |line|

@@ -363,6 +363,101 @@ class TemplateCompilerTest < Minitest::Test
     refute_includes result, 'desc'
   end
 
+  # --- 変数が 2 つ以上ある行: 空のキーを含む部品だけを消す ---
+
+  BIBLIOGRAPHY = "= author.name 著／= publisher／= year 年\n"
+
+  # 区切りで分けた部品のうち、空のキーを含むものだけが消え、区切りが詰まる
+  def test_should_drop_only_the_parts_with_empty_keys
+    full = { author: { name: '高橋征義' }, publisher: 'SBクリエイティブ', year: 2019 }
+
+    assert_equal "高橋征義 著／SBクリエイティブ／2019 年\n", Compiler.render(BIBLIOGRAPHY, [full])
+    assert_equal "高橋征義 著／SBクリエイティブ\n", Compiler.render(BIBLIOGRAPHY, [full.merge(year: nil)])
+    assert_equal "高橋征義 著／2019 年\n", Compiler.render(BIBLIOGRAPHY, [full.merge(publisher: '')])
+    assert_equal "SBクリエイティブ／2019 年\n", Compiler.render(BIBLIOGRAPHY, [full.merge(author: nil)])
+    assert_equal "高橋征義 著\n", Compiler.render(BIBLIOGRAPHY, [full.merge(publisher: nil, year: nil)])
+  end
+
+  # 部品が 1 つも残らなければ、今までどおり行ごと消す
+  def test_should_skip_the_line_when_no_part_is_left
+    template = "### = title\n#{BIBLIOGRAPHY}"
+
+    record = { title: 'はじめてのC', author: nil, publisher: nil, year: nil }
+
+    assert_equal "### はじめてのC\n", Compiler.render(template, [record])
+  end
+
+  # 変数を含む括弧は 1 つの部品。中が空なら、直前の空白ごと括弧を消す
+  def test_should_drop_a_parenthesized_part_with_its_leading_space
+    template = "= author.name 著（= year年）\n= publisher (= year)\n"
+    record = { author: { name: '椋田 實' }, publisher: '技術評論社', year: nil }
+
+    assert_equal "椋田 實 著\n技術評論社\n", Compiler.render(template, [record])
+    assert_equal "椋田 實 著（2008年）\n技術評論社 (2008)\n", Compiler.render(template, [record.merge(year: 2008)])
+  end
+
+  # 中黒・読点・コンマ・前後に空白のある半角の斜線も区切りになる
+  def test_should_split_at_each_kind_of_separator
+    record = { a: 'A', b: nil, c: 'C' }
+
+    %w[・ 、 ， ,].each do |separator|
+      assert_equal "A#{separator}C\n", Compiler.render("= a#{separator}= b#{separator}= c\n", [record])
+    end
+    assert_equal "A / C\n", Compiler.render("= a / = b / = c\n", [record])
+  end
+
+  # 空白なしの半角の斜線は区切りにしない（URL を割らない）
+  def test_should_not_split_a_url_at_its_slashes
+    template = "[= title](https://example.com/books/= id)\n"
+
+    assert_equal '', Compiler.render(template, [{ title: '楽しいRuby', id: nil }]), 'URL の一部が空なら行ごと消える'
+    assert_equal "[楽しいRuby](https://example.com/books/42)\n", Compiler.render(template, [{ title: '楽しいRuby', id: 42 }])
+    assert_equal '', Compiler.render("[= title](= url)\n", [{ title: '楽しいRuby', url: nil }]), 'リンク先の括弧は部品にしない'
+  end
+
+  # 行頭の Markdown の目印は、先頭の部品が消えても残す
+  def test_should_keep_the_line_marker_when_the_first_part_is_dropped
+    template = "- = author.name 著／= publisher\n"
+
+    assert_equal "- 技術評論社\n", Compiler.render(template, [{ author: nil, publisher: '技術評論社' }])
+  end
+
+  # 表の行は部品に分けない。セルを消すと列がずれるので、今までどおり行ごと消す
+  def test_should_skip_a_table_row_as_a_whole
+    template = "| 書名 | 出版社 |\n|---|---|\n| = title | = publisher、= year |\n"
+    records = [{ title: '楽しいRuby', publisher: 'SBクリエイティブ' }, { title: 'はじめてのC', publisher: '技術評論社', year: 2008 }]
+
+    result = Compiler.render(template, records)
+    refute_includes result, '楽しいRuby'
+    assert_includes result, '| はじめてのC | 技術評論社、2008 |'
+  end
+
+  # 変数が 1 つだけの行は、今までどおり空なら行ごと消す（括弧の中でも）
+  def test_should_skip_a_single_variable_line_as_before
+    assert_equal '', Compiler.render("刊行（= year 年）\n", [{ title: 'x', year: nil }])
+  end
+
+  # 省ける項目は 1 件目に無くてもよい。どれか 1 件にあるキーは打ち間違いとみなさない
+  def test_should_accept_a_key_that_only_a_later_record_has
+    records = [
+      { title: 'はじめてのC', author: { name: '椋田 實' } },
+      { title: '楽しいRuby', author: { name: '高橋征義' }, year: 2019 }
+    ]
+
+    result = Compiler.render("= author.name 著（= year年）\n", records)
+
+    assert_includes result, "椋田 實 著\n"
+    assert_includes result, "高橋征義 著（2019年）\n"
+  end
+
+  # 値の中に `= key` の形があっても、もう一度展開しない
+  def test_should_not_expand_variables_inside_values
+    template = "= formula（= note）\n"
+    record = { formula: 'E = mc', note: 'x = desc', mc: '展開されてはいけない', desc: '同じく' }
+
+    assert_equal "E = mc（x = desc）\n", Compiler.render(template, [record])
+  end
+
   # 画像記法の変数展開が正しく動作する
   def test_should_expand_image_variable
     template = "![](cover){width=40%}\n"
