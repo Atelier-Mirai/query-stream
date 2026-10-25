@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   素の名前を昇順にすると主キー検索と区別が付かなくなるので、**いまの仕様のほうが正しい**。分岐とコメントが古かったので、符号が必須であることを前提に書き直した。挙動は変えていない（`+` / `-` の両方を実測で確認）。
 
 ### Changed
-- **対応 Ruby を 3.4.10 / 4.0.7 にした**。4.0.7 は 2026-09-15 公開。
+- **対応 Ruby を 3.4.10 / 4.0.9 にした**。4.0.9 は 2026-10-23 公開。
 - **依存を最新へ上げた**: Minitest → 6.0.6、samovar 2.4.1 → 2.5.1、rake 13.3.1 → 13.4.2。gemspec の minitest は `~> 5.22` から `>= 5.22` へ緩めた——5 系に固定する理由が無く、6 でも 158 件すべて通る（`stub` / `mock` を使っていないため、6 での `minitest/mock` 分離の影響も受けない）。
 - **rubocop を入れた**（`.rubocop.yml`・`rake rubocop`・CI）。見るのは `Lint` と `Security` だけで、引用符や行数は見ない。他の 2 つの gem と同じ構えである。現状 0 件。
 - **README と CHANGELOG の「vivlio-style」を「Vivlio Starter」にした**。製品名を崩した綴りだった。
