@@ -25,6 +25,9 @@ module QueryStream
     # AND 条件の区切りパターン
     AND_PATTERN = /\s+(?:AND|and|&&)\s+/
 
+    # OR 条件の区切りパターン。`||` は記法の区切りの `|` と衝突するので使わない
+    OR_PATTERN = /\s+(?:OR|or)\s+/
+
     # 桁をアンダースコアで区切った数（9_000_000 / 900_0000 / 1_234.5）。
     # Ruby の数値リテラルと同じく、区切りは数字と数字のあいだにだけ置ける。
     # 区切り方は問わないので、万の位で区切る 900_0000 も書ける。
@@ -159,37 +162,35 @@ module QueryStream
       parse_eq_condition(field, value_str)
     end
 
-    # AND で接続されたフィルタ式をパースする
-    # @param expression [String] "tags=ruby && category=web"
-    # @return [Array<Hash>] フィルタ条件のリスト
+    # AND / OR で接続されたフィルタ式をパースする。AND は OR より強く結び付く。
+    # 項目名を省いた値は、直前の条件の項目を引き継ぐ（tags=ruby AND beginner）。
+    # @param expression [String] "tags=ruby && category=web" / "tags=ruby OR tags=go"
+    # @return [Array<Hash>] すべて満たすフィルタ条件のリスト。OR は { op: :or, branches: } の 1 条件にまとめる
     def parse_filter_expression(expression)
-      # AND で分割
-      clauses = expression.split(AND_PATTERN)
       previous_field = nil
-      previous_filter = nil
 
-      clauses.flat_map do |clause|
-        clause = clause.strip
-        next [] if clause.empty?
-
-        parsed = parse_single_condition(clause)
-
-        if parsed.empty? && previous_field
-          if previous_filter && previous_filter[:field] == previous_field && previous_filter[:op] == :eq
-            additional = parse_values(clause)
-            previous_filter[:value] = Array(previous_filter[:value]) + additional
-            next []
-          else
-            parsed = parse_value_only_condition(previous_field, clause)
-          end
+      branches = expression.split(OR_PATTERN).map do |branch|
+        branch.split(AND_PATTERN).flat_map do |clause|
+          parsed = parse_clause(clause.strip, previous_field)
+          previous_field = parsed.last&.[](:field) || previous_field
+          parsed
         end
+      end.reject(&:empty?)
 
-        last_filter = parsed.last
-        previous_field = last_filter&.[](:field)
-        previous_filter = last_filter if last_filter&.[](:op) == :eq
+      branches.size > 1 ? [{ op: :or, branches: }] : branches.flatten
+    end
 
-        parsed
-      end
+    # AND / OR で区切られた 1 節をパースする
+    # @param clause [String] "tags=ruby" / "beginner"
+    # @param previous_field [Symbol, nil] 項目名を省いたときに引き継ぐ項目
+    # @return [Array<Hash>] フィルタ条件
+    def parse_clause(clause, previous_field)
+      return [] if clause.empty?
+
+      parsed = parse_single_condition(clause)
+      return parsed unless parsed.empty? && previous_field
+
+      parse_value_only_condition(previous_field, clause)
     end
 
     # 単一条件をパースする（OR はカンマ区切りで表現）
@@ -244,6 +245,9 @@ module QueryStream
         # 通常の等値条件（カンマ区切りでOR）
         [{ field: field_sym, op: :eq, value: parse_values(value_str) }]
       end
+    rescue ArgumentError
+      # 両端を比較できない範囲（2020..abc）は Range を作れないので、文字列の値として扱う
+      [{ field: field_sym, op: :eq, value: parse_values(value_str) }]
     end
 
     # カンマ区切りの値をリストとしてパースする

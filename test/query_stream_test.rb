@@ -301,13 +301,49 @@ class QueryStreamParserTest < Minitest::Test
     assert_equal 5, result[:limit]
   end
 
-  # AND 連結時に2件目以降のフィールド省略を許容する
+  # AND の 2 件目以降は項目名を省ける。省いた値も別の条件になる
   def test_should_allow_fieldless_and_clause
     result = Parser.parse('= books | tags = ruby && beginner')
-    assert_equal 1, result[:filters].size
-    filter = result[:filters].first
+    assert_equal 2, result[:filters].size
+    assert_equal({ field: :tags, op: :eq, value: ['ruby'] }, result[:filters][0])
+    assert_equal({ field: :tags, op: :eq, value: ['beginner'] }, result[:filters][1])
+  end
+
+  # OR は枝を持つ 1 つの条件になる
+  def test_should_parse_or_filter
+    %w[OR or].each do |word|
+      result = Parser.parse("= books | tags=ruby #{word} tags=go")
+      assert_equal 1, result[:filters].size
+      filter = result[:filters].first
+      assert_equal :or, filter[:op]
+      assert_equal([['ruby'], ['go']], filter[:branches].map { it.first[:value] })
+    end
+  end
+
+  # AND は OR より強く結び付く
+  def test_should_bind_and_tighter_than_or
+    filter = Parser.parse('= books | tags=ruby AND year>=2020 OR tags=go')[:filters].first
+    assert_equal [2, 1], filter[:branches].map(&:size)
+  end
+
+  # OR でも項目名を省ける
+  def test_should_allow_fieldless_or_clause
+    filter = Parser.parse('= books | tags=ruby OR go')[:filters].first
+    assert_equal([:tags, :tags], filter[:branches].map { it.first[:field] })
+  end
+
+  # 値だけの主キー検索は、OR を含んでいても検索語のまま扱う
+  def test_should_keep_or_in_primary_lookup_value
+    result = Parser.parse('= book | Rock or Pop')
+    assert result[:single_lookup]
+    assert_equal 'Rock or Pop', result[:filters].first[:value]
+  end
+
+  # 両端を比較できない範囲は、範囲ではなく文字列の値として扱う
+  def test_should_treat_incomparable_range_as_value
+    filter = Parser.parse('= books | year=2020..abc')[:filters].first
     assert_equal :eq, filter[:op]
-    assert_equal [:ruby, :beginner].map(&:to_s), filter[:value]
+    assert_equal ['2020..abc'], filter[:value]
   end
 end
 
@@ -746,6 +782,69 @@ class FilterEngineTest < Minitest::Test
     filters = [{ field: :score, op: :gte, value: 80 }]
     result = Engine.apply_filters(records, filters)
     assert_equal 2, result.size
+  end
+
+  # 比較では、値が無いレコードと比較できない値のレコードを除く
+  def test_should_exclude_missing_and_incomparable_values_from_comparison
+    records = [
+      { name: 'A', year: 2020 },
+      { name: 'B' },
+      { name: 'C', year: '' },
+      { name: 'D', year: '不明' }
+    ]
+    %i[gt gte lt lte].each do |op|
+      result = Engine.apply_filters(records, [{ field: :year, op:, value: 2020 }])
+      assert_equal(%i[gte lte].include?(op) ? ['A'] : [], result.map { it[:name] })
+    end
+  end
+
+  # 文字列と比べるときも、値が無いレコードは除く（空文字列は小さい値として扱わない）
+  def test_should_exclude_missing_value_from_string_comparison
+    records = [{ name: 'A', code: 'b' }, { name: 'B' }, { name: 'C', code: '' }]
+    result = Engine.apply_filters(records, [{ field: :code, op: :lt, value: 'c' }])
+    assert_equal(['A'], result.map { it[:name] })
+  end
+
+  # 両端を比較できない範囲は、どのレコードにも一致しない
+  def test_should_not_match_range_with_incomparable_ends
+    records = [{ name: 'A', date: Date.new(2024, 1, 1) }]
+    filters = [{ field: :date, op: :range, value: 'R06-01-01'..'abc' }]
+    assert_equal [], Engine.apply_filters(records, filters)
+  end
+
+  # OR は枝のどれかを満たせばよい。枝の中の条件はすべて満たす
+  def test_should_filter_by_or_branches
+    records = [
+      { name: 'A', tags: %w[ruby beginner] },
+      { name: 'B', tags: %w[ruby] },
+      { name: 'C', tags: %w[go] }
+    ]
+    branches = [
+      [{ field: :tags, op: :eq, value: ['ruby'] }, { field: :tags, op: :eq, value: ['beginner'] }],
+      [{ field: :tags, op: :eq, value: ['go'] }]
+    ]
+    result = Engine.apply_filters(records, [{ op: :or, branches: }])
+    assert_equal(%w[A C], result.map { it[:name] })
+  end
+
+  # ソートでは、値が無いレコードを昇順でも降順でも末尾に置く
+  def test_should_sort_missing_values_last
+    records = [{ name: 'A' }, { name: 'B', year: 2021 }, { name: 'C', year: '' }, { name: 'D', year: 2020 }]
+    assert_equal(%w[D B A C], Engine.apply_sort(records, { field: :year, direction: :asc }).map { it[:name] })
+    assert_equal(%w[B D A C], Engine.apply_sort(records, { field: :year, direction: :desc }).map { it[:name] })
+  end
+
+  # ソートでは、比較できない値のレコードも末尾に置く。比べるのは最も多い種類の値
+  def test_should_sort_incomparable_values_last
+    records = [{ name: 'A', year: '不明' }, { name: 'B', year: 2021 }, { name: 'C', year: 2020 }]
+    assert_equal(%w[C B A], Engine.apply_sort(records, { field: :year, direction: :asc }).map { it[:name] })
+    assert_equal(%w[B C A], Engine.apply_sort(records, { field: :year, direction: :desc }).map { it[:name] })
+  end
+
+  # 値がすべて無いソートは例外にならない
+  def test_should_sort_records_without_any_value
+    records = [{ name: 'A' }, { name: 'B' }]
+    assert_equal 2, Engine.apply_sort(records, { field: :year, direction: :asc }).size
   end
 
   # 範囲フィルタが動作する

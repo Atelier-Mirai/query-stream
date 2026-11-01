@@ -18,6 +18,14 @@ module QueryStream
     # 年は 1 桁でもよい（R6-01-01）。
     WAREKI_DATE = /\A(?<era>[MTSHR])(?<year>\d{1,2})-(?<month>\d{2})-(?<day>\d{2})\z/
 
+    # 大小の条件と、<=> の結果の判定
+    ORDER_TESTS = {
+      gt:  ->(order) { order.positive? },
+      gte: ->(order) { order >= 0 },
+      lt:  ->(order) { order.negative? },
+      lte: ->(order) { order <= 0 }
+    }.freeze
+
     module_function
 
     # フィルタ条件をレコード群に適用する
@@ -32,13 +40,21 @@ module QueryStream
       end
     end
 
-    # ソート条件を適用する
+    # ソート条件を適用する。
+    # 比べるのは最も多い種類の値で、それ以外の値と、値が無いレコードは、向きによらず末尾に置く。
     # @param records [Array<Hash>] レコード群
     # @param sort [Hash] ソート条件 { field:, direction: }
     # @return [Array<Hash>] ソート後のレコード群
     def apply_sort(records, sort)
-      sorted = records.sort_by { to_comparable(it[sort[:field]]) }
-      sort[:direction] == :desc ? sorted.reverse : sorted
+      keyed = records.map do |record|
+        value = record[sort[:field]]
+        [record, missing_value?(value) ? nil : to_comparable(value)]
+      end
+      kind = keyed.filter_map { |_, key| sort_kind(key) }.tally.max_by { |_, count| count }&.first
+
+      sortable, others = keyed.partition { |_, key| sort_kind(key) == kind }
+      sorted = sortable.sort_by(&:last).map(&:first)
+      (sort[:direction] == :desc ? sorted.reverse : sorted) + others.map(&:first)
     end
 
     # 単一フィルタ条件をレコードに対して評価する
@@ -58,22 +74,52 @@ module QueryStream
         match_eq(field_value, filter[:value])
       when :neq
         !match_eq(field_value, filter[:value])
-      when :gt
-        to_comparable(field_value) > to_comparable(filter[:value])
-      when :gte
-        to_comparable(field_value) >= to_comparable(filter[:value])
-      when :lt
-        to_comparable(field_value) < to_comparable(filter[:value])
-      when :lte
-        to_comparable(field_value) <= to_comparable(filter[:value])
+      when :gt, :gte, :lt, :lte
+        satisfies_order?(field_value, filter)
       when :range
-        # 両端も比較用にそろえる。パーサーは "2024-06-01".."2024-06-30" のような
-        # 文字列の範囲を返すので、そのままでは Date の値を含まない。
-        range = filter[:value]
-        Range.new(to_comparable(range.begin), to_comparable(range.end), range.exclude_end?)
-             .cover?(to_comparable(field_value))
+        within_range?(field_value, filter[:value])
+      when :or
+        filter[:branches].any? { |branch| branch.all? { evaluate_filter(record, it) } }
       else
         false
+      end
+    end
+
+    # 大小の条件を満たすか。値が無いレコードと、比較できない値のレコードは満たさない
+    # @param field_value [Object] レコードの値
+    # @param filter [Hash] フィルタ条件 { op:, value: }
+    # @return [Boolean]
+    def satisfies_order?(field_value, filter)
+      return false if missing_value?(field_value)
+
+      order = to_comparable(field_value) <=> to_comparable(filter[:value])
+      !order.nil? && ORDER_TESTS.fetch(filter[:op]).call(order)
+    end
+
+    # 範囲に含まれるか。両端も比較用にそろえる。パーサーは "2024-06-01".."2024-06-30" のような
+    # 文字列の範囲を返すので、そのままでは Date の値を含まない。
+    # @param field_value [Object] レコードの値
+    # @param range [Range] 範囲
+    # @return [Boolean]
+    def within_range?(field_value, range)
+      Range.new(to_comparable(range.begin), to_comparable(range.end), range.exclude_end?)
+           .cover?(to_comparable(field_value))
+    rescue ArgumentError
+      # 両端を比較できない範囲（Range.new が受け付けない）
+      false
+    end
+
+    # 値が無いか（キーが無い・nil・空文字列）
+    def missing_value?(value) = value.nil? || value == ''
+
+    # ソートで比べられる値の種類。値が無いときは nil
+    def sort_kind(key)
+      case key
+      when nil then nil
+      when Numeric then :number
+      when Date then :date
+      when Time then :time
+      else :string
       end
     end
 
