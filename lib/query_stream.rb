@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
 # ================================================================
-# File: lib/query_stream.rb
-# ================================================================
 # 責務:
 #   QueryStream gem のエントリポイント。
 #   YAML/JSON データファイルとテンプレートファイルを組み合わせて、
@@ -120,8 +118,6 @@ module QueryStream
       parsed = QueryStreamParser.parse(query)
 
       # --- Phase: Load Data ---
-      # gem 内でログ出力せず、構造化された属性を持つ例外を raise する。
-      # メッセージの構成・ログ出力・i18n は呼び出し元の責務とする。
       data_file = DataResolver.resolve(parsed[:source], data_dir)
       unless data_file
         expected = File.join(data_dir, "#{parsed[:source]}.yml")
@@ -147,13 +143,11 @@ module QueryStream
       if parsed[:single_lookup]
         case records.size
         when 0
-          # gem 内でログ出力せず、構造化された属性を持つ警告を呼び出し元に委ねる。
           on_warning&.call(NoResultWarning.new(query: query, location: location))
           return ''
         when 1
           # 正常
         else
-          # gem 内でログ出力せず、構造化された属性を持つ警告を呼び出し元に委ねる。
           on_warning&.call(
             AmbiguousQueryWarning.new(query: query, location: location, count: records.size)
           )
@@ -168,8 +162,6 @@ module QueryStream
 
       unless File.exist?(template_path)
         hint = build_template_hint(singular, style, format, templates_dir)
-        # gem 内でログ出力せず、構造化された属性を持つ例外を raise する。
-        # メッセージの構成・ログ出力・i18n は呼び出し元の責務とする。
         raise TemplateNotFoundError.new(
           template_path: template_path,
           query:         query,
@@ -185,7 +177,7 @@ module QueryStream
 
       # --- Phase: Post-render filter ---
       # 展開結果を呼び出し元の後段フィルタへ通す（画像パス解決など gem 外の後処理）。
-      # コールバックが String 以外を返した場合は安全側に倒して元の展開結果を採用する。
+      # コールバックが String 以外を返した場合は、元の展開結果を採用する。
       return rendered unless post_render
 
       context = {
@@ -226,16 +218,12 @@ module QueryStream
 
     # その行を QueryStream 記法として扱うか。
     #
-    # **不正な UTF-8 を含む行は記法として解釈しない。** `match?` はそういう行に
-    # `ArgumentError: invalid byte sequence in UTF-8` を投げるので、素通しにすると
-    # 原稿に 1 バイトの壊れが混ざっただけで展開が丸ごと止まる。
-    # ここでバイト列を書き換えて（scrub して）通す手もあるが採らない——gem が黙って
-    # 原稿のバイト列を変えると、著者が気付けない形で本文が変わる。
-    # 記法として読めない行は本文として、そのまま返すのが正しい。
+    # 不正な UTF-8 を含む行は記法として解釈せず、本文としてそのまま返す。`match?` はそういう行に
+    # `ArgumentError` を投げるので、捕まえないと展開全体が止まる。scrub しないのは、原稿のバイト列を
+    # 変えないため。
     #
-    # EncodingError と ArgumentError の両方を捕まえるのは意図的である。壊れたバイト列に
-    # Ruby がどちらを投げるかはメソッド次第で（match? / 先頭破損の lstrip は ArgumentError、
-    # strip は Encoding::CompatibilityError）、その差で展開が止まってはならない。
+    # EncodingError と ArgumentError の両方を捕まえる。壊れたバイト列に Ruby が投げる例外はメソッドで
+    # 異なる（match? / 先頭破損の lstrip は ArgumentError、strip は Encoding::CompatibilityError）。
     def query_line?(line)
       line.match?(QUERY_STREAM_PATTERN)
     rescue EncodingError, ArgumentError
@@ -243,9 +231,7 @@ module QueryStream
     end
 
     # コードフェンスの開始/終了行か。
-    # `lstrip` も不正な UTF-8 で ArgumentError を投げるので、query_line? と同じく
-    # 「読めない行は本文」へ倒す。ここを素通しにすると、記法判定だけ守っても
-    # 手前のフェンス判定で落ちる。
+    # `lstrip` も不正な UTF-8 で ArgumentError を投げるので、query_line? と同じく本文として扱う。
     def code_fence?(line)
       line.lstrip.start_with?('```')
     rescue EncodingError, ArgumentError
@@ -254,10 +240,9 @@ module QueryStream
 
     # 引数をファイルパスとして読むべきか。
     #
-    # `scan` はパスと本文のどちらも受け取る API なので、本文をそのまま
-    # `File.exist?` へ渡すと壊れる——NUL バイトを含めば `ArgumentError`、
-    # ディレクトリなら「存在する」と判定されて `File.read` が `Errno::EISDIR` を出す。
-    # パスとして成立しうる形だけを先に選別し、判定自体の失敗も本文扱いに倒す。
+    # `scan` はパスと本文のどちらも受け取る。本文を `File.exist?` へ渡すと、NUL バイトを含む場合は
+    # `ArgumentError` になり、ディレクトリは `File.read` が `Errno::EISDIR` を出す。
+    # パスとして成立する形だけを先に選び、判定の失敗も本文として扱う。
     def readable_file?(str)
       s = str.to_s
       return false if s.empty? || s.include?("\0") || s.include?("\n")

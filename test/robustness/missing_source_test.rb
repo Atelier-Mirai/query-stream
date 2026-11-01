@@ -1,12 +1,10 @@
 # frozen_string_literal: true
 
 # ================================================================
-# Test: robustness/missing_source_test.rb
-# ================================================================
 # 検証内容:
 #   データ／テンプレートが無いときの振る舞い。
 #   gem 内ではログを出さず、構造化された属性を持つ例外を投げ、
-#   render は該当行を素通しして残りの展開を続ける（1 行の失敗で全体を止めない）。
+#   render は該当行をそのまま残して残りの展開を続ける（1 行の失敗で全体を止めない）。
 #
 #   属性（expected_path / template_path / query / location / hint）は
 #   呼び出し元がメッセージを組み立てるための情報なので、有無まで固定する。
@@ -47,8 +45,7 @@ class MissingSourceTest < Minitest::Test
     end
   end
 
-  # テンプレートが 1 つも無いときは hint を作れない。**当てずっぽうを返さない**のが
-  # 正しく、呼び出し元は template_path だけで案内する
+  # テンプレートが 1 つも無いときは hint を返さない。呼び出し元は template_path で案内する
   def test_should_not_invent_a_hint_when_nothing_is_close
     in_project do
       write_data('books.yml', "- title: A\n")

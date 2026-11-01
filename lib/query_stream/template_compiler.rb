@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
 # ================================================================
-# File: lib/query_stream/template_compiler.rb
-# ================================================================
 # 責務:
 #   テンプレートファイル（_book.md 等）にデータを流し込み、
 #   テキストを生成するコンパイラ。
@@ -236,7 +234,7 @@ module QueryStream
     end
 
     # テンプレート行をレコードデータで展開する
-    # nil/空文字のキーがあれば行ごとスキップ（nil を返す）
+    # 行ごと消すときは nil を返す
     # @param line [String] テンプレート行
     # @param record [Hash] データレコード
     # @return [String, nil] 展開後の行、またはスキップ時 nil

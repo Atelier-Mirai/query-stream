@@ -1,18 +1,13 @@
 # frozen_string_literal: true
 
 # ================================================================
-# Test: robustness/broken_encoding_test.rb
-# ================================================================
 # 検証内容:
 #   不正な UTF-8 バイト列を含む原稿でも render / scan が落ちないこと。
 #
-#   Ruby の String#match? も lstrip も、不正なバイト列に対して
-#   `ArgumentError: invalid byte sequence in UTF-8` を投げる。素通しにすると
-#   原稿に 1 バイトの壊れが混ざっただけで展開が丸ごと止まる。
+#   Ruby の String#match? も lstrip も、不正なバイト列に
+#   `ArgumentError: invalid byte sequence in UTF-8` を投げる。捕まえないと展開全体が止まる。
 #
-#   **読めない行は本文としてそのまま返す**のが正しい振る舞いである。
-#   scrub して通す設計は採らない——gem が黙ってバイト列を書き換えると、
-#   著者が気付けない形で本文が変わる。
+#   **読めない行は本文としてそのまま返す。** scrub しないのは、原稿のバイト列を変えないため。
 # ================================================================
 
 require_relative '../test_helper'

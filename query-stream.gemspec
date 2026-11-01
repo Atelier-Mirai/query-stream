@@ -25,11 +25,8 @@ Gem::Specification.new do |spec|
   spec.executables   = ['query-stream']
   spec.require_paths = ['lib']
 
-  # Runtime dependencies
-  # logger への依存は 1.4.0 で外した。gem 自身はログを出さず、失敗は構造化例外で伝える。
   spec.add_dependency 'samovar', '~> 2.1'
 
-  # Development dependencies
   spec.add_development_dependency 'bundler'
   spec.add_development_dependency 'rake', '~> 13.2'
   spec.add_development_dependency 'minitest', '>= 5.22'

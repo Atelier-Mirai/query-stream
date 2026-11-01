@@ -1,12 +1,10 @@
 # frozen_string_literal: true
 
 # ================================================================
-# Test: robustness/scan_input_test.rb
-# ================================================================
 # 検証内容:
 #   QueryStream.scan は「ファイルパス」と「本文」のどちらも受け取る API である。
-#   本文をそのまま File.exist? へ渡すと壊れるため、パスとして成立しうる形だけを
-#   選別してから読む。
+#   本文をそのまま File.exist? へ渡すと例外になるので、パスとして成立する形だけを
+#   選んでから読む。
 #     - NUL バイトを含む本文 → ArgumentError: path name contains null byte
 #     - ディレクトリ         → File.exist? は true を返し File.read が Errno::EISDIR
 #     - 極端に長い本文       → パスとして扱う意味がない
@@ -53,7 +51,7 @@ class ScanInputTest < Minitest::Test
     assert_empty QueryStream.scan('')
   end
 
-  # コードブロック内の記法は拾わない（既存の仕様。壊れた入力と混ざっても保つ）
+  # コードブロック内の記法は検出しない（壊れた入力が混ざっていても同じ）
   def test_should_skip_queries_inside_code_block
     content = "```\n= books\n```\n\0\n= prefectures\n"
 

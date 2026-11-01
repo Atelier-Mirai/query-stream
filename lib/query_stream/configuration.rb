@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
 # ================================================================
-# File: lib/query_stream/configuration.rb
-# ================================================================
 # 責務:
 #   QueryStream のグローバル設定を管理する。
 #   data_dir, templates_dir, default_format, post_render の4項目。

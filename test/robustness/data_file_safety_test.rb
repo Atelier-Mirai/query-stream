@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
 # ================================================================
-# Test: robustness/data_file_safety_test.rb
-# ================================================================
 # 検証内容:
 #   著者が用意した YAML/JSON が壊れていても、gem の外へ出るのは
 #   QueryStream::DataLoadError だけであること。
@@ -18,8 +16,8 @@ require_relative 'robustness_helper'
 class DataFileSafetyTest < Minitest::Test
   include RobustnessHelper
 
-  # !ruby/object は読み込まない。任意オブジェクト生成の入口を塞ぐのが目的で、
-  # 例外型が変わると呼び出し元が「どのファイルが悪いか」を案内できなくなる
+  # !ruby/object は読み込まない（任意のオブジェクトの生成を防ぐ）。例外の型を DataLoadError に
+  # そろえ、呼び出し元がファイルを案内できるようにする
   def test_should_reject_ruby_object_tag_as_data_load_error
     in_project do
       write_data('evil.yml', "- !ruby/object:Gem::Requirement\n  title: x\n")
@@ -60,8 +58,7 @@ class DataFileSafetyTest < Minitest::Test
     end
   end
 
-  # 空のデータファイルで YAML は nil を返す。素通しすると呼び出し先が
-  # `undefined method 'any?' for nil` で落ち、著者は NoMethodError を見ることになる
+  # 空のデータファイルで YAML は nil を返すので、空配列として扱う
   def test_should_treat_empty_data_file_as_no_records
     in_project do
       write_data('books.yml', '')
@@ -80,7 +77,7 @@ class DataFileSafetyTest < Minitest::Test
     end
   end
 
-  # ハッシュ 1 件はレコード 1 件として受ける（既存の仕様）
+  # ハッシュ 1 件はレコード 1 件として受ける
   def test_should_wrap_single_hash_into_one_record
     in_project do
       write_data('books.yml', "title: A\n")
@@ -89,7 +86,7 @@ class DataFileSafetyTest < Minitest::Test
     end
   end
 
-  # レコード群として解釈しようがない中身は、理由を添えて弾く
+  # レコード群として解釈できない中身は、理由を添えて DataLoadError にする
   def test_should_reject_scalar_data_with_actionable_message
     in_project do
       write_data('books.yml', "just a string\n")

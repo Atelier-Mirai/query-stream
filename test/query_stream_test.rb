@@ -378,7 +378,7 @@ class TemplateCompilerTest < Minitest::Test
     assert_equal "高橋征義 著\n", Compiler.render(BIBLIOGRAPHY, [full.merge(publisher: nil, year: nil)])
   end
 
-  # 部品が 1 つも残らなければ、今までどおり行ごと消す
+  # 部品が 1 つも残らなければ、行ごと消す
   def test_should_skip_the_line_when_no_part_is_left
     template = "### = title\n#{BIBLIOGRAPHY}"
 
@@ -422,7 +422,7 @@ class TemplateCompilerTest < Minitest::Test
     assert_equal "- 技術評論社\n", Compiler.render(template, [{ author: nil, publisher: '技術評論社' }])
   end
 
-  # 表の行は部品に分けない。セルを消すと列がずれるので、今までどおり行ごと消す
+  # 表の行は部品に分けない。セルを消すと列がずれるので、行ごと消す
   def test_should_skip_a_table_row_as_a_whole
     template = "| 書名 | 出版社 |\n|---|---|\n| = title | = publisher、= year |\n"
     records = [{ title: '楽しいRuby', publisher: 'SBクリエイティブ' }, { title: 'はじめてのC', publisher: '技術評論社', year: 2008 }]
@@ -432,7 +432,7 @@ class TemplateCompilerTest < Minitest::Test
     assert_includes result, '| はじめてのC | 技術評論社、2008 |'
   end
 
-  # 変数が 1 つだけの行は、今までどおり空なら行ごと消す（括弧の中でも）
+  # 変数が 1 つだけの行は、空なら行ごと消す（括弧の中でも）
   def test_should_skip_a_single_variable_line_as_before
     assert_equal '', Compiler.render("刊行（= year 年）\n", [{ title: 'x', year: nil }])
   end
@@ -902,9 +902,6 @@ class DataResolverTest < Minitest::Test
   # ----------------------------------------------------------------
   # セキュリティ: YAML safe_load による !ruby/object 等の拒否
   # ----------------------------------------------------------------
-  # 対応する Vivlio Starter 堅牢性仕様:
-  #   - 11-2: data/*.yml に !ruby/object タグが含まれる場合の安全性
-  # ----------------------------------------------------------------
 
   # !ruby/object タグを含む YAML は DataLoadError で拒否される
   def test_should_reject_ruby_object_tag_in_yaml
@@ -1006,16 +1003,6 @@ class DataResolverTest < Minitest::Test
     require 'tmpdir'
     Dir.mktmpdir('qs-safety-') do |tmp|
       path = File.join(tmp, 'aliases.yml')
-      File.write(path, <<~YAML)
-        defaults: &defaults
-          role: member
-        - <<: *defaults
-          name: alice
-        - <<: *defaults
-          name: bob
-      YAML
-      # 注: 上記は Hash + Array の混在で YAML としては不正だが、意図のみを書き残す
-      # 代わりにシンプルなエイリアスで確認する
       File.write(path, <<~YAML)
         - &a1
           name: alice
