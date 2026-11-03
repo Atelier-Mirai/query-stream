@@ -73,6 +73,74 @@ module QueryStream
     end
   end
 
+  # テンプレートで、そのままでは表示できない値（ハッシュ、またはハッシュや配列を含む配列）を出そうとした
+  #
+  # `= author` と書いて author が `{name:, bio:}` のとき、どれを出すかを gem は決められない。
+  # Ruby の表記（{name: "…"}）を紙面に出さず、直し方を示せるだけの素材を渡す。
+  # 文字列や数の配列は表示できる（list_separator でつなぐ）ので、このエラーにならない。
+  #
+  # @attr_reader key_path [String] テンプレートに書かれたキー（"author" 等）
+  # @attr_reader available_keys [Array<Symbol>] ハッシュの中のキー（`= author.name` と書き直す候補）。配列のときは空
+  # @attr_reader list [Boolean] ハッシュや配列を含む配列か（書き直す先のキーが無い）
+  # @attr_reader template_path [String, nil] 直すテンプレートのパス
+  # @attr_reader location [String] 記法が書かれていたソースファイル名と行番号
+  class NestedValueError < Error
+    attr_reader :key_path, :available_keys, :list, :template_path, :location
+
+    def initialize(msg = nil, key_path: nil, available_keys: [], list: false, template_path: nil, location: nil)
+      super(msg || "そのままでは表示できない値です: #{key_path}")
+      @key_path       = key_path
+      @available_keys = Array(available_keys)
+      @list           = list
+      @template_path  = template_path
+      @location       = location
+    end
+
+    # テンプレートの位置と記法の位置を付け足して投げ直すときに使う（値を表示する箇所は位置を知らない）
+    def with_context(template_path:, location:)
+      self.class.new(message, key_path:, available_keys:, list:, template_path:, location:)
+    end
+  end
+
+  # 抽出条件・並べ替えの指定が使えない
+  #
+  # 条件を無視して全件を出すと、書いた本人は絞り込んだつもりのまま気づけない。
+  # 理由は 2 通りで、reason で見分ける。
+  # - :unparseable   — 条件として読めない（`年=2019`・`tags=`・項目名の無い `ruby AND go`）
+  # - :unknown_field — どのレコードにも無い項目を指している（`tag=ruby` の打ち間違い）
+  #
+  # @attr_reader reason [Symbol] :unparseable / :unknown_field
+  # @attr_reader condition [String] 問題の条件（読めない綴り、または無い項目名）
+  # @attr_reader available_keys [Array<Symbol>] レコードが実際に持つキー（:unknown_field のとき）
+  # @attr_reader query [String] 元の QueryStream 記法
+  # @attr_reader location [String] ソースファイル名と行番号
+  class InvalidQueryError < Error
+    attr_reader :reason, :condition, :available_keys, :query, :location
+
+    def initialize(msg = nil, reason: :unparseable, condition: nil, available_keys: [], query: nil, location: nil)
+      super(msg || default_message(reason, condition))
+      @reason         = reason
+      @condition      = condition
+      @available_keys = Array(available_keys)
+      @query          = query
+      @location       = location
+    end
+
+    # 記法の位置を付け足して投げ直すときに使う（パーサーは位置を知らない）
+    def with_context(query:, location:)
+      self.class.new(message, reason:, condition:, available_keys:, query:, location:)
+    end
+
+    private
+
+    def default_message(reason, condition)
+      case reason
+      when :unknown_field then "どのレコードにも無い項目です: #{condition}"
+      else "抽出条件を読めません: #{condition}"
+      end
+    end
+  end
+
   class InvalidDateError < Error; end    # 無効な日付
 
   # データファイルの読み込みに失敗した

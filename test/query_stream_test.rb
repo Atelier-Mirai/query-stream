@@ -345,6 +345,22 @@ class QueryStreamParserTest < Minitest::Test
     assert_equal :eq, filter[:op]
     assert_equal ['2020..abc'], filter[:value]
   end
+
+  # 項目名はドットでネストした値を指せる（テンプレートの = author.name と同じ）
+  def test_should_parse_dotted_field_in_filter_and_sort
+    result = Parser.parse('= books | author.name=高橋征義 | -author.name')
+    assert_equal({ field: :'author.name', op: :eq, value: ['高橋征義'] }, result[:filters].first)
+    assert_equal({ field: :'author.name', direction: :desc }, result[:sort])
+  end
+
+  # 読めない条件は捨てずにエラーにする。捨てると全件が出て、絞り込みが外れたことに気づけない
+  def test_should_raise_on_unparseable_condition
+    ['= books | 年=2019', '= books | tags=', '= books | ruby AND go', '= books | tags=ruby AND 年=2019',
+     '= books | -title foo'].each do |query|
+      error = assert_raises(QueryStream::InvalidQueryError, query) { Parser.parse(query) }
+      assert_equal :unparseable, error.reason
+    end
+  end
 end
 
 # ================================================================
@@ -752,6 +768,60 @@ class TemplateCompilerTest < Minitest::Test
     assert_equal 1, first_dyn
     assert_equal 1, last_dyn
   end
+
+  # 配列の値は、抽出条件と同じく複数の値として扱い、「、」でつないで出す
+  def test_should_join_array_values_with_the_list_separator
+    template = "= title: = tags\n"
+    records = [{ title: 'A', tags: %w[ruby beginner] }, { title: 'B', tags: 'c, beginner' }]
+
+    result = Compiler.render(template, records)
+
+    assert_includes result, 'A: ruby、beginner'
+    assert_includes result, 'B: c, beginner' # カンマ区切りの文字列は書いたまま出す
+  end
+
+  # 区切りは設定で変えられる（英語の文章なら ", "）
+  def test_should_use_the_configured_list_separator
+    QueryStream.configuration.list_separator = ', '
+    assert_equal "ruby, go\n", Compiler.render("= tags\n", [{ tags: %w[ruby go] }])
+  ensure
+    QueryStream.configuration.list_separator = '、'
+  end
+
+  # 空の配列は値が無いのと同じで、行や部品を消す
+  def test_should_treat_an_empty_array_as_a_missing_value
+    records = [{ title: 'A', tags: [] }]
+
+    assert_equal '', Compiler.render("タグ: = tags\n", records)
+    assert_equal "A\n", Compiler.render("= title（= tags）\n", records)
+  end
+
+  # ハッシュは出し方を決められないので、中のキーを添えてエラーにする。直すテンプレートと位置も付ける
+  def test_should_raise_with_inner_keys_when_a_hash_is_displayed
+    records = [{ title: 'A', author: { name: '高橋征義', bio: 'Rubyist' } }]
+
+    error = assert_raises(QueryStream::NestedValueError) do
+      Compiler.render("= title / = author\n", records,
+                      source_filename: 'ch.md', line_number: 3, template_path: 'templates/_book.md')
+    end
+
+    assert_pattern do
+      { key_path: error.key_path, available_keys: error.available_keys, list: error.list,
+        template_path: error.template_path, location: error.location } =>
+        { key_path: 'author', available_keys: %i[name bio], list: false,
+          template_path: 'templates/_book.md', location: 'ch.md:3' }
+    end
+  end
+
+  # ハッシュや配列を含む配列も、そのままでは出せないのでエラーにする。書き直す先のキーは無い
+  def test_should_raise_when_an_array_of_hashes_is_displayed
+    records = [{ authors: [{ name: 'a' }, { name: 'b' }] }]
+
+    error = assert_raises(QueryStream::NestedValueError) { Compiler.render("![](authors)\n", records) }
+
+    assert error.list
+    assert_empty error.available_keys
+  end
 end
 
 # ================================================================
@@ -962,6 +1032,34 @@ class FilterEngineTest < Minitest::Test
     assert Engine.evaluate_primary_key_lookup(record, 'my-first-post')
     refute Engine.evaluate_primary_key_lookup(record, 'nonexistent')
   end
+  # ネストした値で絞り込み、並べ替えられる
+  def test_should_filter_and_sort_by_nested_value
+    records = [
+      { title: 'A', author: { name: 'Sato' } },
+      { title: 'B', author: { name: 'Abe' } },
+      { title: 'C' }
+    ]
+    filtered = Engine.apply_filters(records, [{ field: :'author.name', op: :eq, value: ['Abe'] }])
+    assert_equal(['B'], filtered.map { it[:title] })
+
+    sorted = Engine.apply_sort(records, { field: :'author.name', direction: :asc })
+    assert_equal(%w[B A C], sorted.map { it[:title] })
+  end
+
+  # どのレコードにも無い項目を条件・並べ替えに使うとエラーにする。OR の枝の中も見る
+  def test_should_reject_fields_that_no_record_has
+    records = [{ title: 'A', tags: ['ruby'] }, { title: 'B', year: 2020 }]
+    parse = ->(query) { QueryStream::QueryStreamParser.parse(query) }
+
+    Engine.validate_fields!(records, parse.('= books | tags=ruby OR year>=2020 | -year'))
+
+    ['= books | tag=ruby', '= books | tags=ruby OR yaer>=2020', '= books | -yaer'].each do |query|
+      error = assert_raises(QueryStream::InvalidQueryError, query) { Engine.validate_fields!(records, parse.(query)) }
+      assert_equal :unknown_field, error.reason
+      assert_equal %i[title tags year], error.available_keys
+    end
+  end
+
 end
 
 # ================================================================
@@ -1515,6 +1613,29 @@ class QueryStreamIntegrationTest < Minitest::Test
     assert_includes result, '楽しいRuby'    # 1行目は展開される
     assert_includes result, '= books | :shart'  # 2行目は元の行が残る
     assert_includes result, '東京都'         # 3行目は展開される
+  end
+
+  # 使えない条件は元の行を残し、位置と記法を付けて on_error へ渡す
+  def test_should_keep_line_and_report_invalid_query
+    errors = []
+    result = QueryStream.render(
+      "前の行\n= books | tag=ruby\n= books | 年=2019\n後の行\n",
+      source_filename: 'test.md',
+      data_dir: FIXTURE_DATA_DIR,
+      templates_dir: FIXTURE_TEMPLATES_DIR,
+      on_error: ->(e) { errors << e }
+    )
+
+    reported = errors.map { { reason: it.reason, condition: it.condition, query: it.query, location: it.location } }
+    assert_pattern do
+      reported => [
+        { reason: :unknown_field, condition: 'tag', query: '= books | tag=ruby', location: 'test.md:2' },
+        { reason: :unparseable, condition: '年=2019', query: '= books | 年=2019', location: 'test.md:3' }
+      ]
+    end
+    assert_includes result, '= books | tag=ruby'
+    assert_includes result, '= books | 年=2019'
+    refute_includes result, '楽しいRuby'
   end
 
   # DataNotFoundError が構造化属性を持つ

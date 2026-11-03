@@ -131,6 +131,7 @@ module QueryStream
       records = DataResolver.load_records(data_file)
 
       # --- Phase: Filter ---
+      FilterEngine.validate_fields!(records, parsed)
       records = FilterEngine.apply_filters(records, parsed[:filters])
 
       # --- Phase: Sort ---
@@ -190,6 +191,9 @@ module QueryStream
       }
       result = post_render.call(rendered, context)
       result.is_a?(String) ? result : rendered
+    rescue InvalidQueryError => e
+      # パーサーとフィルタは記法の位置を知らないので、ここで付け足して投げ直す
+      raise e.with_context(query:, location:)
     end
 
     # テキスト内の QueryStream 記法を検出してリストを返す

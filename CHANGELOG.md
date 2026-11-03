@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-04
+
+### Added
+- **テンプレートで配列の値を表示できるようにした** (`template_compiler.rb` / `configuration.rb`): `= tags` が `tags: [ruby, beginner]` のとき、`ruby、beginner` と出す（1.5 までは Ruby の表記 `["ruby", "beginner"]` が出ていた）。区切りは `config.list_separator`（既定は「、」）。空の要素は落とし、空の配列は値が無いのと同じに扱う（行・部品を消す）。カンマ区切りの文字列は書いたまま出す。
+- **抽出条件と並べ替えで、ドットでつないだ項目名を使えるようにした** (`query_stream_parser.rb` / `filter_engine.rb`): `= books | author.name=高橋征義` や `= books | -author.name` のように、ネストした値で絞り込み、並べ替えられる。テンプレートの `= author.name` と同じ書き方である。項目名には数字も使える（`temp2>=20`）。
+
+### Fixed
+- **テンプレートでハッシュの値を出すと、Ruby の表記がそのまま出ていた** (`template_compiler.rb` / `errors.rb`): `= author` で author が `{name:, bio:}` のとき、`{name: "高橋征義", bio: "…"}` が紙面に出た。どれをどう出すかは決められないので、新しい `NestedValueError` を投げ、その行は記法のまま残す。`available_keys` にハッシュの中のキーを入れ、`= author.name` への書き直しを案内できるようにした。ハッシュや配列を含む配列も同じエラーにする（`list: true`、書き直す先のキーは無い）。
+- **読めない抽出条件が無視され、全件が出力されていた** (`query_stream_parser.rb` / `errors.rb`): `年=2019`（英字でない項目名）・`tags=`（値が空）・`ruby AND go`（項目名が無い）・`author.name=…`（1.5 まではドットを読めなかった）のような条件は、空の条件として捨てられ、エラーも警告も無いまま絞り込みが外れていた。新しい `InvalidQueryError`（`reason: :unparseable`）を投げ、その行は記法のまま残す。項目名を省いた節でも、演算子を含む節（`tags=ruby AND 年=2019` の `年=2019`）は値として扱わずエラーにする。並べ替えの項目名として読めない綴り（`-title foo`）も同じ。
+- **どのレコードにも無い項目で絞り込むと 0 件、並べ替えると定義順のまま、何も知らせずに展開していた** (`filter_engine.rb`): `tag=ruby`（`tags` の打ち間違い）や `-yaer` が該当する。`InvalidQueryError`（`reason: :unknown_field`、`available_keys` 付き）を投げる。テンプレートのキーと同じく一番上の階層だけを見て、どれか 1 件にあれば正しい項目とみなす。
+
 ## [1.5.0] - 2026-11-01
 
 ### Added

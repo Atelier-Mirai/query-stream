@@ -43,13 +43,13 @@ result = QueryStream.render(source, data_dir: 'data', templates_dir: 'templates'
 = books | tags=ruby | -title | 5  # 絞り込み＋降順ソート＋5件
 = prefectures | population>=9_000_000  # 数は _ で桁を区切れる（900_0000 も可）
 = weather_reports | date>=R06-01-01    # 日付は西暦（2024-01-01）でも和暦でも書ける
-= book | 楽しいRuby               # 主キーで一件検索
+= book | たのしいRuby               # 主キーで一件検索
 = books | :full                   # fullスタイルで展開
 ```
 
 **ソートには符号を必ず付けてください**（`+` が昇順、`-` が降順）。符号を省いた
 `= books | title` はソートではなく**主キー検索**として扱われ、該当なしの警告とともに
-何も展開されません。`= book | 楽しいRuby` のような一件検索と綴りが同じになるため、
+何も展開されません。`= book | たのしいRuby` のような一件検索と綴りが同じになるため、
 符号の有無で見分けています。
 
 ソートでは、最も多い種類の値（数・日付・文字列）を比べます。値が無いレコードと、それ以外の
@@ -101,12 +101,16 @@ AND は OR より強く結び付きます。`tags=ruby AND year>=2020 OR tags=go
 
 比較（`>`・`>=`・`<`・`<=`）と範囲では、値が無いレコードと、比較できない値のレコード（数と比べるときの `不明` など）を除きます。
 
+項目名は半角英数字と `_` で書きます。`author.name` のようにドットでつなぐと、ネストした値で絞り込めます（並べ替えの `-author.name` も同じ）。
+
+条件として読めない指定（`年=2019`・`tags=`・項目名の無い `ruby AND go`）と、どのレコードにも無い項目（`tag=ruby` の打ち間違い）は `InvalidQueryError` になり、その行は展開されません。条件を無視して全件を出したり、0 件のまま気づかずに済ませたりはしません。項目があるかは、テンプレートのキーと同じく一番上の階層だけを見て、どれか 1 件にあれば正しい項目とみなします。
+
 ### 一件検索
 
 値だけを書くと、主キーで検索します。主キーとして調べるのは `id`・`no`・`code`・`slug`・`name`・`title` です。
 
 ```
-= book | 楽しいRuby    # title が一致するレコード
+= book | たのしいRuby    # title が一致するレコード
 = post | hello-world   # slug が一致するレコード
 ```
 
@@ -139,6 +143,10 @@ AND は OR より強く結び付きます。`tags=ruby AND year>=2020 OR tags=go
 | `![](cover)`・`![](= cover)` | 画像のパスをキーの値で展開する |
 | `![](logo.png)` | 拡張子のあるパスはそのまま出力する |
 
+値が配列（`tags: [ruby, beginner]`）なら、要素を `config.list_separator`（既定は「、」）でつないで出力します（`ruby、beginner`）。カンマ区切りの文字列（`tags: ruby, beginner`）は、抽出条件では配列と同じに扱いますが、表示では書いたまま出力します。空の配列は値が無いのと同じです。
+
+値がハッシュ（`author: {name: …, bio: …}`）や、ハッシュ・配列を含む配列のときは、どれをどう出すかを決められないので `NestedValueError` になります。`= author` は `= author.name` の書き間違いであることがほとんどなので、エラーの `available_keys` にハッシュの中のキーを入れて渡します。
+
 変数を含む行はレコードごとに繰り返し、含まない行は 1 回だけ出力します。表は次のように書くと、見出しが 1 回だけ出力されます。
 
 ```markdown
@@ -154,7 +162,7 @@ AND は OR より強く結び付きます。`tags=ruby AND year>=2020 OR tags=go
 #### データファイル例 (`data/books.yml`)
 
 ```yaml
-- title: 楽しいRuby
+- title: たのしいRuby
   author: 
     name: 高橋征義
   desc: Rubyを楽しく学べる入門書。
@@ -194,7 +202,7 @@ AND は OR より強く結び付きます。`tags=ruby AND year>=2020 OR tags=go
 
 :::{.book-card}
 ![](ruby.webp)
-**楽しいRuby**
+**たのしいRuby**
 Rubyを楽しく学べる入門書。
 :::
 
@@ -260,6 +268,7 @@ QueryStream.configure do |config|
   config.data_dir       = 'data'
   config.templates_dir  = 'templates'
   config.default_format = :md
+  config.list_separator = '、'   # 配列の値をつなぐ区切り
   config.post_render    = ->(text, context) { text }
 end
 ```
@@ -288,11 +297,13 @@ QueryStream.render(
 | `DataNotFoundError` | `expected_path`, `query`, `location` |
 | `DataLoadError` | `file_path`, `cause_error` |
 | `UnknownKeyError` | `key_path`, `available_keys`, `template_path`, `location` |
+| `NestedValueError` | `key_path`, `available_keys`, `list`, `template_path`, `location` |
+| `InvalidQueryError` | `reason`（`:unparseable`・`:unknown_field`）, `condition`, `available_keys`, `query`, `location` |
 | `InvalidDateError` | なし（`message` に日付を含みます） |
 | `NoResultWarning` | `query`, `location` |
 | `AmbiguousQueryWarning` | `query`, `location`, `count` |
 
-前 5 つは `QueryStream::Error`、後 2 つは `QueryStream::Warning` を継承します。**gem の外へ出る例外はこの 2 系統だけ**です。壊れた YAML も、不正な UTF-8 を含む原稿も、生の `ArgumentError` や `NoMethodError` にはなりません。
+前 7 つは `QueryStream::Error`、後 2 つは `QueryStream::Warning` を継承します。**gem の外へ出る例外はこの 2 系統だけ**です。壊れた YAML も、不正な UTF-8 を含む原稿も、生の `ArgumentError` や `NoMethodError` にはなりません。
 
 たとえば `UnknownKeyError` は「使えるキーの一覧」と「直すべき雛形のパス」を属性に持つので、呼び出し元で打ち間違いの案内を組み立てられます。`location` は記法が書かれた原稿の位置、`template_path` は直す雛形の位置で、**直すのは雛形のほう**です。
 

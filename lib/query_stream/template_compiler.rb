@@ -139,6 +139,9 @@ module QueryStream
       end
 
       output.join
+    rescue NestedValueError => e
+      # 値を表示するときに見つかるので、ここで直すテンプレートと記法の位置を付け足す
+      raise e.with_context(template_path:, location: source_filename ? "#{source_filename}:#{line_number}" : '')
     end
 
     # テンプレート行を分類する
@@ -271,12 +274,12 @@ module QueryStream
           match
         else
           # 変数として展開（ドット記法対応）
-          value = resolve_nested_value(record, src)
-          if value.nil? || value.to_s.strip.empty?
+          text = display_text(resolve_nested_value(record, src), src)
+          if text.strip.empty?
             skip = true
             match # gsub のブロックからは文字列を返す必要がある
           else
-            "![#{alt}](#{value})#{attr}"
+            "![#{alt}](#{text})#{attr}"
           end
         end
       end
@@ -355,14 +358,36 @@ module QueryStream
 
       result.gsub!(VARIABLE_PATTERN) do |_match|
         key_path = $1
-        value = resolve_nested_value(record, key_path)
-        if value.nil? || value.to_s.strip.empty?
-          return nil # 行ごとスキップ
-        end
-        value.to_s
+        text = display_text(resolve_nested_value(record, key_path), key_path)
+        return nil if text.strip.empty? # 行ごとスキップ
+
+        text
       end
 
       result
+    end
+
+    # 値を、テンプレートに埋め込む文字列にする。値が無いときは空文字列（呼び出し側が行・部品を消す）。
+    #
+    # 配列（tags: [ruby, beginner]）は、抽出条件と同じく複数の値として扱い、list_separator でつなぐ。
+    # 空の要素は落とし、全部空なら値が無いのと同じにする。
+    # ハッシュと、ハッシュや配列を含む配列は、どう並べて出すかを gem が決められない。
+    # 黙って Ruby の表記（{name: "…"}）を出さず、NestedValueError で書き方を直してもらう。
+    # `= author` は `= author.name` の書き間違いであることがほとんどなので、中のキーを渡す。
+    # @param value [Object, nil] resolve_nested_value の結果
+    # @param key_path [String] テンプレートに書かれたキー（エラーの報告用）
+    # @return [String]
+    # @raise [NestedValueError] ハッシュ、またはハッシュや配列を含む配列
+    def display_text(value, key_path)
+      case value
+      in nil then ''
+      in Hash then raise NestedValueError.new(key_path:, available_keys: value.keys)
+      in Array if value.any? { it.is_a?(Hash) || it.is_a?(Array) }
+        raise NestedValueError.new(key_path:, available_keys: [], list: true)
+      in Array
+        value.map { it.to_s.strip }.reject(&:empty?).join(QueryStream.configuration.list_separator)
+      else value.to_s
+      end
     end
 
     # ドット記法のキーパスをたどってネストされた値を取得する

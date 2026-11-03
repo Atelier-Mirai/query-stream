@@ -33,6 +33,12 @@ module QueryStream
     # 区切り方は問わないので、万の位で区切る 900_0000 も書ける。
     NUMBER_WITH_SEPARATORS = /\A-?\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?\z/
 
+    # 抽出条件・並べ替えの項目名。テンプレートの `= author.name` と同じく、ドットでネストした値を指せる。
+    FIELD = /[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*/
+
+    # 演算子の文字。値だけの節（項目名を省いた `beginner`）に含まれていれば、読み損ねた条件である。
+    OPERATOR_CHARS = /[=!<>]/
+
     module_function
 
     # QueryStream 記法をパースして構造化ハッシュを返す
@@ -145,13 +151,18 @@ module QueryStream
 
     # ソート指定をパースする。
     #
-    # **符号は必須である。** 呼び出し側（parse_segment）が `+` か `-` で始まることを確かめてから渡す。
-    # 符号なしの `title` は、`= book | 楽しいRuby` と区別できないので主キー検索として扱う。
+    # **符号は必須である。** 呼び出し側（classify_tokens）が `+` か `-` で始まることを確かめてから渡す。
+    # 符号なしの `title` は、`= book | たのしいRuby` と区別できないので主キー検索として扱う。
+    # 項目名として読めない綴り（`-title foo`）は、並べ替えずに出すと気づけないのでエラーにする。
     #
-    # @param token [String] "-title" / "+title"
+    # @param token [String] "-title" / "+author.name"
     # @return [Hash] { field:, direction: }
+    # @raise [InvalidQueryError] 項目名として読めない
     def parse_sort(token)
-      { field: token[1..].to_sym, direction: token.start_with?('-') ? :desc : :asc }
+      field = token[1..].strip
+      raise InvalidQueryError.new(condition: token) unless field.match?(/\A#{FIELD}\z/o)
+
+      { field: field.to_sym, direction: token.start_with?('-') ? :desc : :asc }
     end
 
     # 直前フィールドを引き継いで値のみの条件をパースする
@@ -180,17 +191,21 @@ module QueryStream
       branches.size > 1 ? [{ op: :or, branches: }] : branches.flatten
     end
 
-    # AND / OR で区切られた 1 節をパースする
+    # AND / OR で区切られた 1 節をパースする。
+    # 読めない節を空の条件として捨てると、全件が出て絞り込みが黙って外れるので、エラーにする。
+    # 値だけの節は、直前の項目があり、演算子を含まないときだけ受け付ける（`年=2019` を値にしない）。
     # @param clause [String] "tags=ruby" / "beginner"
     # @param previous_field [Symbol, nil] 項目名を省いたときに引き継ぐ項目
     # @return [Array<Hash>] フィルタ条件
+    # @raise [InvalidQueryError] 条件として読めない
     def parse_clause(clause, previous_field)
       return [] if clause.empty?
 
       parsed = parse_single_condition(clause)
-      return parsed unless parsed.empty? && previous_field
+      return parsed unless parsed.empty?
+      return parse_value_only_condition(previous_field, clause) if previous_field && !clause.match?(OPERATOR_CHARS)
 
-      parse_value_only_condition(previous_field, clause)
+      raise InvalidQueryError.new(condition: clause)
     end
 
     # 単一条件をパースする（OR はカンマ区切りで表現）
@@ -199,17 +214,17 @@ module QueryStream
     def parse_single_condition(condition)
       # 比較演算子の検出（!=, >=, <=, >, <, ==, = の順で試行）
       case condition.strip
-      in /\A([a-zA-Z_]+)\s*!=\s*(.+)\z/
+      in /\A(#{FIELD})\s*!=\s*(.+)\z/
         [{ field: $1.to_sym, op: :neq, value: parse_values($2) }]
-      in /\A([a-zA-Z_]+)\s*>=\s*(.+)\z/
+      in /\A(#{FIELD})\s*>=\s*(.+)\z/
         [{ field: $1.to_sym, op: :gte, value: parse_numeric($2.strip) }]
-      in /\A([a-zA-Z_]+)\s*<=\s*(.+)\z/
+      in /\A(#{FIELD})\s*<=\s*(.+)\z/
         [{ field: $1.to_sym, op: :lte, value: parse_numeric($2.strip) }]
-      in /\A([a-zA-Z_]+)\s*>\s*(.+)\z/
+      in /\A(#{FIELD})\s*>\s*(.+)\z/
         [{ field: $1.to_sym, op: :gt, value: parse_numeric($2.strip) }]
-      in /\A([a-zA-Z_]+)\s*<\s*(.+)\z/
+      in /\A(#{FIELD})\s*<\s*(.+)\z/
         [{ field: $1.to_sym, op: :lt, value: parse_numeric($2.strip) }]
-      in /\A([a-zA-Z_]+)\s*={1,2}\s*(.+)\z/
+      in /\A(#{FIELD})\s*={1,2}\s*(.+)\z/
         parse_eq_condition($1.strip, $2.strip)
       else
         # パースできない場合は空で返す

@@ -47,7 +47,7 @@ module QueryStream
     # @return [Array<Hash>] ソート後のレコード群
     def apply_sort(records, sort)
       keyed = records.map do |record|
-        value = record[sort[:field]]
+        value = value_at(record, sort[:field])
         [record, missing_value?(value) ? nil : to_comparable(value)]
       end
       kind = keyed.filter_map { |_, key| sort_kind(key) }.tally.max_by { |_, count| count }&.first
@@ -55,6 +55,41 @@ module QueryStream
       sortable, others = keyed.partition { |_, key| sort_kind(key) == kind }
       sorted = sortable.sort_by(&:last).map(&:first)
       (sort[:direction] == :desc ? sorted.reverse : sorted) + others.map(&:first)
+    end
+
+    # 抽出条件と並べ替えの項目が、どれか 1 件のレコードにあるかを確かめる。
+    # 無い項目（`tag=ruby` の打ち間違い）で絞ると 0 件になり、並べ替えは定義順のままになる。
+    # どちらも展開自体は成功するので、書いた本人は気づけない。テンプレートのキーと同じく、
+    # 見るのは一番上の階層のキーだけで、どれか 1 件にあれば正しい項目とみなす。
+    # @param records [Array<Hash>] 絞り込む前のレコード群
+    # @param parsed [Hash] QueryStreamParser.parse の結果
+    # @raise [InvalidQueryError] どのレコードにも無い項目を指している
+    def validate_fields!(records, parsed)
+      available_keys = records.flat_map(&:keys).uniq
+      return if available_keys.empty?
+
+      fields = condition_fields(parsed[:filters])
+      fields << parsed[:sort][:field] if parsed[:sort]
+      unknown = fields.find { !available_keys.include?(it.to_s.split('.').first.to_sym) }
+      return unless unknown
+
+      raise InvalidQueryError.new(reason: :unknown_field, condition: unknown.to_s, available_keys:)
+    end
+
+    # 条件が指す項目名を集める。OR の枝の中も見る。主キー検索は項目名を持たないので除く。
+    def condition_fields(filters)
+      filters.flat_map do |filter|
+        case filter
+        in { op: :or, branches: } then branches.flat_map { condition_fields(it) }
+        in { field: :_primary_key } then []
+        in { field: } then [field]
+        end
+      end
+    end
+
+    # ドットでつないだ項目名（:"author.name"）をたどって値を返す。途中で途切れたら nil。
+    def value_at(record, field)
+      field.to_s.split('.').reduce(record) { |value, key| value.is_a?(Hash) ? value[key.to_sym] : nil }
     end
 
     # 単一フィルタ条件をレコードに対して評価する
@@ -67,7 +102,7 @@ module QueryStream
         return evaluate_primary_key_lookup(record, filter[:value])
       end
 
-      field_value = record[filter[:field]]
+      field_value = value_at(record, filter[:field])
 
       case filter[:op]
       when :eq
